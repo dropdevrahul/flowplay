@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add a visual diagram editor and JSON editor to the ff-viewer. Two modes: **View** (existing step-through behavior) and **Edit** (canvas interaction + side panel). Users toggle between them.
+Add a visual diagram editor and JSON editor to the Flowplay diagram player. Two modes: **View** (existing step-through behavior) and **Edit** (canvas interaction + side panel). Users toggle between them.
 
 ---
 

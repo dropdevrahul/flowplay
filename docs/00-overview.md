@@ -1,4 +1,4 @@
-# ff-viewer — overview & plan
+# Flowplay — overview & plan
 
 A tiny scene runtime: define **elements** and **interactions** programmatically in Zig,
 compile to **WASM**, render **beautiful smooth graphics** in the browser. Think
@@ -83,7 +83,7 @@ fix the one line, move on. Concepts don't change; spelling does.
 
 ## File layout you'll end up with
 ```
-ff-viewer/
+flowplay/
   build.zig
   src/
     main.zig        # exports: init, frame, on_click, on_key

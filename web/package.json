@@ -1,5 +1,6 @@
 {
-  "name": "ff-viewer",
+  "name": "flowplay",
+  "description": "Interactive diagram player for flowcharts and state machines — Zig + WASM + Canvas2D",
   "private": true,
   "type": "module",
   "scripts": {

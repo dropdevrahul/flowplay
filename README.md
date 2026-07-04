@@ -1,12 +1,20 @@
-# ff-viewer
+# Flowplay
 
-A tiny **diagram player**: describe a flowchart or state machine as JSON, watch it play out —
-a token walks the path, active node and edge glow, edges are smooth curves. Runtime is Zig
-compiled to WASM; rendering is Canvas2D. No dependencies, no build step for authors.
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Zig](https://img.shields.io/badge/Zig-0.16-orange)](https://ziglang.org)
+[![WASM](https://img.shields.io/badge/target-WASM-purple)](https://webassembly.org)
+
+**Flowplay** is a lightweight, interactive diagram player for flowcharts and state machines. Describe your diagram as JSON — Flowplay renders it with smooth animated transitions, curved edges, and an in-browser editor. Powered by **Zig** + **WASM** + **Canvas2D**.
+
+- **Zero runtime dependencies** — the core is a single `.wasm` binary
+- **No build step for authors** — write JSON, hit refresh
+- **Dual mode** — view animated playback or edit visually in the browser
 
 ![kinds: rect, roundrect, ellipse, diamond; curved arrows; a traveling token]
 
-## Run
+---
+
+## Quick start
 
 ```sh
 zig build                       # -> zig-out/bin/runtime.wasm  (needs Zig 0.16)
@@ -17,9 +25,11 @@ python3 -m http.server 8080     # WASM won't load from file://
 Pick a diagram from the dropdown. Controls: **Space** play/pause, **→** step, **←** back,
 **R** restart.
 
+---
+
 ## Author your own diagram
 
-Drop a `.json` file in `examples/`, add its name to the `<select>` in `web/index.html`.
+Drop a `.json` file in `examples/`, add its name to the diagram picker in `web/src/components/TopBar.tsx`.
 No recompile — the Zig runtime parses JSON at load time.
 
 ```json
@@ -56,19 +66,44 @@ node borders and follow the curve tangent. `a→b` and `b→a` bend opposite way
 Ordered node ids. The token travels each consecutive pair; the last→first makes it loop. The
 node it's leaving is highlighted. Omit `play` (or give <2 ids) for a static diagram.
 
-## Layout
+---
+
+## Project layout
 
 ```
-build.zig          # Zig 0.16 wasm build
-src/main.zig       # model, JSON loader, geometry, playback, input  (one file)
-web/index.html     # canvas + diagram picker
-web/host.js        # Canvas2D draw calls + JSON loader glue
-examples/*.json    # diagrams as data
-docs/              # staged Zig+WASM build tutorial (how this was built)
+build.zig            # Zig 0.16 wasm build
+src/                 # Zig runtime: model, geometry, playback, input
+├── main.zig
+├── model.zig
+├── geom.zig
+└── host.zig
+web/                 # Browser frontend (React + Vite)
+├── index.html
+├── src/
+│   └── components/  # React components (TopBar, Editor, etc.)
+└── public/
+examples/            # Sample diagrams as JSON
+docs/                # Development tutorial and design docs
 ```
 
-## Not yet (deliberately)
-- Data charts (bar/pie/line) — different layer (data→geometry).
-- Auto-layout — positions are manual `x`/`y` for now.
-- Orthogonal/elbow edge routing and self-loops — edges are quadratic curves.
-- In-browser JSON editor — author in a file today.
+---
+
+## Roadmap
+
+- [x] Core player (animated token, curved edges, keyboard controls)
+- [x] In-browser editor (visual + JSON)
+- [x] Graph types: flowchart, state machine
+- [ ] Auto-layout
+- [ ] Orthogonal / elbow edge routing
+- [ ] Self-loop support
+- [ ] Data charts
+
+---
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+Flowplay is open source under the [MIT License](LICENSE).

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Complete all remaining gaps in the in-browser diagram editor for ff-viewer.
+**Goal:** Complete all remaining gaps in the in-browser diagram editor for Flowplay.
 
 **Architecture:** Extend the existing editor infrastructure — `DiagramEditor` (state/undo), `CanvasRenderer` (canvas interactions), React components (panels/property editors). All edit-mode state lives in JS; WASM is a render-only consumer.
 

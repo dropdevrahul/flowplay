@@ -30,7 +30,7 @@ const MODES: Mode[] = ['view', 'edit', 'simulate']
 export function TopBar({ diagram, theme, mode, graphType, onDiagramChange, onThemeChange, onModeChange, onTypeChange }: TopBarProps) {
   return (
     <div className="panel topbar">
-      <span className="brand">ff<span>·</span>viewer</span>
+      <span className="brand">Flowplay</span>
       <div className="divider" />
       <div className="field">
         <label htmlFor="pick">Diagram</label>
