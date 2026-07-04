@@ -9,6 +9,8 @@ interface ToolPaletteProps {
   onRedo: () => void
   canUndo: boolean
   canRedo: boolean
+  fontSize: number
+  onFontChange: (px: number) => void
 }
 
 const NODE_TYPES: { kind: string; label: string; shape: React.ReactNode }[] = [
@@ -46,7 +48,7 @@ function hover(on: boolean, color = 'var(--accent)') {
   }
 }
 
-export function ToolPalette({ onAddNode, onConnect, onAddSubgraph, onDuplicate, onDelete, onClear, onUndo, onRedo, canUndo, canRedo }: ToolPaletteProps) {
+export function ToolPalette({ onAddNode, onConnect, onAddSubgraph, onDuplicate, onDelete, onClear, onUndo, onRedo, canUndo, canRedo, fontSize, onFontChange }: ToolPaletteProps) {
   return (
     <div>
       <div style={heading}>Nodes</div>
@@ -73,6 +75,13 @@ export function ToolPalette({ onAddNode, onConnect, onAddSubgraph, onDuplicate, 
         <button style={canUndo ? act : actOff} onClick={canUndo ? onUndo : undefined}>Undo</button>
         <button style={canRedo ? act : actOff} onClick={canRedo ? onRedo : undefined}>Redo</button>
         <button style={act} onClick={onClear} onMouseEnter={hover(true, '#ef4444')} onMouseLeave={hover(false)}>Clear</button>
+      </div>
+
+      <div style={{ ...heading, marginTop: 18 }}>Text</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>Font</span>
+        <input type="range" min={8} max={40} value={fontSize} onChange={(e) => onFontChange(+e.target.value)} style={{ flex: 1, accentColor: 'var(--accent)' }} />
+        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text)', width: 34, textAlign: 'right' }}>{fontSize}px</span>
       </div>
 
       <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 14, lineHeight: 1.6 }}>

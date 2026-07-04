@@ -12,12 +12,22 @@ export interface NodeSpec {
   fill?: number
   stroke?: number
   label?: string
+  fontSize?: number
+  role?: 'initial' | 'normal' | 'final'
+  data?: Record<string, string | number | boolean>
 }
 
 export interface EdgeSpec {
   from: string
   to: string
-  label: string
+  label?: string
+  event?: string
+  guard?: string
+  actions?: string
+  color?: number
+  dashed?: boolean
+  route?: 'curved' | 'orthogonal'
+  waypoints?: Pt[]
 }
 
 export interface SubgraphSpec {
@@ -30,6 +40,9 @@ export interface DiagramState {
   nodes: NodeSpec[]
   edges: EdgeSpec[]
   subgraphs: SubgraphSpec[]
+  type?: 'flowchart' | 'statemachine'
+  variables?: Record<string, number | string | boolean>
+  fontSize?: number
 }
 
 export interface TransitionPill {

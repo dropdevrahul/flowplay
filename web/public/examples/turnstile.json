@@ -1,0 +1,14 @@
+{
+  "type": "statemachine",
+  "variables": { "coins": 0 },
+  "nodes": [
+    { "id": "locked", "label": "Locked", "role": "initial", "kind": "roundrect" },
+    { "id": "unlocked", "label": "Unlocked", "kind": "roundrect" }
+  ],
+  "edges": [
+    { "from": "locked", "to": "unlocked", "event": "COIN", "actions": "coins += 1" },
+    { "from": "unlocked", "to": "locked", "event": "PUSH" },
+    { "from": "locked", "to": "locked", "event": "PUSH" },
+    { "from": "unlocked", "to": "unlocked", "event": "COIN", "guard": "coins < 3", "actions": "coins += 1" }
+  ]
+}

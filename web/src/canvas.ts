@@ -34,10 +34,13 @@ export class CanvasRenderer implements DrawAPI {
 
   // edit mode
   editMode = false
+  simMode = false
   editor: DiagramEditor | null = null
+  simulation: import('./renderer/sim').Simulation | null = null
   private tempEdge: { fromNode: string; fromPort: Pt; toPt: Pt } | null = null
   private connectFrom: string | null = null
   private dragNode: string | null = null
+  private dragWaypoint: { from: string; to: string; index: number } | null = null
   private dragStart = { x: 0, y: 0 }
   private nodeStart = { x: 0, y: 0 }
 
@@ -51,6 +54,7 @@ export class CanvasRenderer implements DrawAPI {
   onError: ((msg: string) => void) | null = null
   onSelectionChange: ((id: string | null) => void) | null = null
   onDoubleClick: ((nodeId: string, screenX: number, screenY: number) => void) | null = null
+  onEdgeDoubleClick: ((from: string, to: string, screenX: number, screenY: number) => void) | null = null
 
   private boundResize: () => void
   private boundWheel: (e: WheelEvent) => void
@@ -85,23 +89,54 @@ export class CanvasRenderer implements DrawAPI {
     window.addEventListener('mousemove', this.boundMouseMove)
     window.addEventListener('mouseup', this.boundMouseUp)
     window.addEventListener('keydown', this.boundKeyDown)
-    canvas.addEventListener('mouseleave', () => { this.dragging = false; this.dragNode = null })
+    canvas.addEventListener('mouseleave', () => { this.dragging = false; this.dragNode = null; this.dragWaypoint = null })
     canvas.style.cursor = 'grab'
 
     this.boundDoubleClick = (e: MouseEvent) => {
-      if (!this.editMode || !this.editor) return
+      if (!this.editMode || !this.editor || this.simMode) return
+      const ed = this.editor
       const rect = this.canvas.getBoundingClientRect()
-      const mx = e.clientX - rect.left
-      const my = e.clientY - rect.top
-      const wx = this.cam.worldX(mx)
-      const wy = this.cam.worldY(my)
+      const wx = this.cam.worldX(e.clientX - rect.left)
+      const wy = this.cam.worldY(e.clientY - rect.top)
 
-      for (const n of this.editor.state.nodes) {
+      // double-click a waypoint on the selected edge to remove it
+      if (ed.getSelectionType() === 'edge') {
+        const se = ed.getSelectedEdge()
+        if (se?.waypoints) {
+          for (let i = 0; i < se.waypoints.length; i++) {
+            if (Math.hypot(wx - se.waypoints[i].x, wy - se.waypoints[i].y) < 8) {
+              ed.removeWaypoint(se.from, se.to, i)
+              this.loadStateToWasm(ed.state)
+              window.dispatchEvent(new CustomEvent('editor-state-change'))
+              return
+            }
+          }
+        }
+      }
+
+      // node label edit
+      for (const n of ed.state.nodes) {
         if (wx >= n.x! && wx <= n.x! + n.w! && wy >= n.y! && wy <= n.y! + n.h!) {
-          this.editor.select(n.id)
+          ed.select(n.id)
           this.onSelectionChange?.(n.id)
           this.onDoubleClick?.(n.id, e.clientX, e.clientY)
           return
+        }
+      }
+
+      // edge label edit
+      for (const e2 of ed.state.edges) {
+        const a = ed.state.nodes.find((n) => n.id === e2.from)
+        const b = ed.state.nodes.find((n) => n.id === e2.to)
+        if (!a || !b) continue
+        const pts = this.edgePath(a, b, e2)
+        for (let i = 0; i < pts.length - 1; i++) {
+          if (this.distToSegment(wx, wy, pts[i], pts[i + 1]) < 6) {
+            ed.select('edge:' + e2.from + '→' + e2.to)
+            this.onSelectionChange?.('edge:' + e2.from + '→' + e2.to)
+            this.onEdgeDoubleClick?.(e2.from, e2.to, e.clientX, e.clientY)
+            return
+          }
         }
       }
     }
@@ -363,7 +398,9 @@ export class CanvasRenderer implements DrawAPI {
       this.drawSubgraphFromState(sg)
     }
 
-    if (ed.selected && ed.getSelectionType() === 'subgraph') {
+    const simActive = this.simMode ? this.simulation?.active ?? null : null
+
+    if (!this.simMode && ed.selected && ed.getSelectionType() === 'subgraph') {
       const selSg = ed.getSelectedSubgraph()
       if (selSg) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
@@ -396,8 +433,10 @@ export class CanvasRenderer implements DrawAPI {
       const a = state.nodes.find((n) => n.id === e.from)
       const b = state.nodes.find((n) => n.id === e.to)
       if (!a || !b) continue
-      const isSel = ed.getSelectionType() === 'edge' && ed.selected === 'edge:' + e.from + '→' + e.to
-      this.drawEdgeFromState(a, b, e.label, isSel)
+      const isSel = this.simMode
+        ? e.from === simActive
+        : ed.getSelectionType() === 'edge' && ed.selected === 'edge:' + e.from + '→' + e.to
+      this.drawEdgeFromState(a, b, e, isSel)
     }
 
     if (this.tempEdge) {
@@ -405,17 +444,19 @@ export class CanvasRenderer implements DrawAPI {
     }
 
     for (const n of state.nodes) {
-      const isSel = n.id === ed.selected
+      const isSel = this.simMode ? n.id === simActive : n.id === ed.selected
       this.drawNodeFromState(n, isSel)
     }
 
-    if (ed.selected) {
+    if (!this.simMode && ed.selected) {
       const selNode = state.nodes.find((n) => n.id === ed.selected)
       if (selNode) this.drawPorts(selNode)
     }
 
-    this.readTransitions()
-    this.drawPills()
+    if (!this.simMode) {
+      this.readTransitions()
+      this.drawPills()
+    }
   }
 
   private drawNodeFromState(n: NodeSpec, selected: boolean) {
@@ -462,36 +503,46 @@ export class CanvasRenderer implements DrawAPI {
     ctx.restore()
 
     if (n.label) {
-      this.drawLabel(n.label, cx, cy, 1, selected ? 17 : 16)
+      const base = n.fontSize ?? this.editor?.state.fontSize ?? 16
+      this.drawLabel(n.label, cx, cy, 1, selected ? base + 1 : base)
     }
   }
 
-  private drawEdgeFromState(a: NodeSpec, b: NodeSpec, label: string, active: boolean) {
-    const c = this.theme
-    const ctx = this.ctx
+  // shared polyline used by rendering, hit-testing, and waypoint editing
+  edgePath(a: NodeSpec, b: NodeSpec, edge: EdgeSpec): Pt[] {
     const ax = a.x! + a.w! / 2, ay = a.y! + a.h! / 2
     const bx = b.x! + b.w! / 2, by = b.y! + b.h! / 2
+    const wps = edge.waypoints
+    if (wps && wps.length) {
+      const first = wps[0], last = wps[wps.length - 1]
+      const p1 = this.borderPt(a, first.x, first.y)
+      const p2 = this.borderPt(b, last.x, last.y)
+      return [p1, ...wps, p2]
+    }
     const p1 = this.borderPt(a, bx, by)
     const p2 = this.borderPt(b, ax, ay)
-
-    const dy = p2.y - p1.y
-    const dx = p2.x - p1.x
-    let path: Pt[]
+    const dy = p2.y - p1.y, dx = p2.x - p1.x
     if (Math.abs(dy) > Math.abs(dx) * 0.3) {
       const midY = (p1.y + p2.y) / 2
-      path = [{ x: p1.x, y: p1.y }, { x: p1.x, y: midY }, { x: p2.x, y: midY }, { x: p2.x, y: p2.y }]
-    } else {
-      const midX = (p1.x + p2.x) / 2
-      path = [{ x: p1.x, y: p1.y }, { x: midX, y: p1.y }, { x: midX, y: p2.y }, { x: p2.x, y: p2.y }]
+      return [p1, { x: p1.x, y: midY }, { x: p2.x, y: midY }, p2]
     }
+    const midX = (p1.x + p2.x) / 2
+    return [p1, { x: midX, y: p1.y }, { x: midX, y: p2.y }, p2]
+  }
+
+  private drawEdgeFromState(a: NodeSpec, b: NodeSpec, edge: EdgeSpec, active: boolean) {
+    const c = this.theme
+    const ctx = this.ctx
+    const path = this.edgePath(a, b, edge)
+    const stroke = active ? c.accent : (edge.color !== undefined ? hexU32(edge.color) : c.edge)
 
     ctx.save()
     ctx.beginPath()
     ctx.moveTo(path[0].x, path[0].y)
     for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y)
-    ctx.strokeStyle = active ? c.accent : c.edge
+    ctx.strokeStyle = stroke
     ctx.lineWidth = active ? 2.5 : 1.5
-    ctx.setLineDash([5, 5])
+    ctx.setLineDash(edge.dashed === false ? [] : [5, 5])
     ctx.stroke()
 
     // arrow
@@ -507,17 +558,57 @@ export class CanvasRenderer implements DrawAPI {
       ctx.lineTo(last.x - s * 0.55 * Math.cos(a2), last.y - s * 0.55 * Math.sin(a2))
       ctx.lineTo(last.x - s * Math.cos(a2 + 0.45), last.y - s * Math.sin(a2 + 0.45))
       ctx.closePath()
-      ctx.fillStyle = active ? c.accent : c.edge
+      ctx.fillStyle = stroke
       ctx.fill()
     }
 
-    // edge label
-    if (label && path.length >= 2) {
-      const mid = { x: (path[0].x + path[2].x) / 2, y: (path[0].y + path[2].y) / 2 }
-      this.drawLabel(label, mid.x, mid.y - 9, 1, 11)
+    // event/label (state machine: "event [guard]")
+    const text = this.edgeText(edge)
+    if (text) {
+      const m = Math.floor(path.length / 2)
+      const mid = path.length % 2 === 0
+        ? { x: (path[m - 1].x + path[m].x) / 2, y: (path[m - 1].y + path[m].y) / 2 }
+        : path[m]
+      this.drawLabel(text, mid.x, mid.y - 9, 1, 11)
     }
 
     ctx.restore()
+
+    // waypoint edit handles when this edge is selected
+    if (active && this.editMode && !this.simMode) this.drawWaypointHandles(a, b, edge)
+  }
+
+  private drawWaypointHandles(a: NodeSpec, b: NodeSpec, edge: EdgeSpec) {
+    const ctx = this.ctx
+    const c = this.theme
+    const path = this.edgePath(a, b, edge)
+    ctx.save()
+    // existing waypoints — solid, draggable
+    for (const p of edge.waypoints ?? []) {
+      ctx.fillStyle = c.accent
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
+    }
+    // add-handles at segment midpoints — hollow
+    for (let i = 0; i < path.length - 1; i++) {
+      const mx = (path[i].x + path[i + 1].x) / 2
+      const my = (path[i].y + path[i + 1].y) / 2
+      ctx.fillStyle = c.bgTop
+      ctx.strokeStyle = c.accent
+      ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.arc(mx, my, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  private edgeText(edge: EdgeSpec): string {
+    if (this.editor?.state.type === 'statemachine') {
+      const ev = edge.event ?? ''
+      const g = edge.guard ? ` [${edge.guard}]` : ''
+      return (ev + g) || (edge.label ?? '')
+    }
+    return edge.label ?? ''
   }
 
   private drawSubgraphFromState(sg: SubgraphSpec) {
@@ -588,7 +679,7 @@ export class CanvasRenderer implements DrawAPI {
       ctx.fillStyle = c.edgeLabelText
       ctx.font = `500 11px ${this.FONT_M}`
     } else {
-      ctx.font = `500 14px ${this.FONT_D}`
+      ctx.font = `500 ${size}px ${this.FONT_D}`
       ctx.shadowColor = 'rgba(0,0,0,0.5)'
       ctx.shadowBlur = 4
       ctx.shadowOffsetY = 1
@@ -682,7 +773,7 @@ export class CanvasRenderer implements DrawAPI {
     // don't treat Del/Backspace/Ctrl+Z as canvas commands while typing in a field
     const t = e.target as HTMLElement | null
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-    if (this.editMode) {
+    if (this.editMode && !this.simMode) {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (this.editor?.selected) {
           const selType = this.editor.getSelectionType()
@@ -889,6 +980,13 @@ export class CanvasRenderer implements DrawAPI {
   }
 
   private onEditMouseDown(e: MouseEvent) {
+    if (this.simMode) {
+      // simulate mode: pan only, no editing
+      this.dragging = true
+      this.last = { x: e.clientX, y: e.clientY }
+      this.canvas.style.cursor = 'grabbing'
+      return
+    }
     const ed = this.editor
     if (!ed) return
     const rect = this.canvas.getBoundingClientRect()
@@ -912,6 +1010,36 @@ export class CanvasRenderer implements DrawAPI {
         }
       }
       return
+    }
+
+    // waypoint handles on a selected edge (drag existing, or add on a segment midpoint)
+    if (ed.getSelectionType() === 'edge') {
+      const se = ed.getSelectedEdge()
+      const a = se && ed.state.nodes.find((n) => n.id === se.from)
+      const b = se && ed.state.nodes.find((n) => n.id === se.to)
+      if (se && a && b) {
+        const wps = se.waypoints ?? []
+        for (let i = 0; i < wps.length; i++) {
+          if (Math.hypot(wx - wps[i].x, wy - wps[i].y) < 8) {
+            ed.snapshot()
+            this.dragWaypoint = { from: se.from, to: se.to, index: i }
+            this.canvas.style.cursor = 'grabbing'
+            return
+          }
+        }
+        const path = this.edgePath(a, b, se)
+        for (let i = 0; i < path.length - 1; i++) {
+          const cx = (path[i].x + path[i + 1].x) / 2, cy = (path[i].y + path[i + 1].y) / 2
+          if (Math.hypot(wx - cx, wy - cy) < 7) {
+            ed.addWaypoint(se.from, se.to, i, { x: cx, y: cy })
+            this.dragWaypoint = { from: se.from, to: se.to, index: i }
+            this.canvas.style.cursor = 'grabbing'
+            this.loadStateToWasm(ed.state)
+            window.dispatchEvent(new CustomEvent('editor-state-change'))
+            return
+          }
+        }
+      }
     }
 
     // port hit-test on selected node
@@ -970,15 +1098,7 @@ export class CanvasRenderer implements DrawAPI {
       const a = ed.state.nodes.find((n) => n.id === e.from)
       const b = ed.state.nodes.find((n) => n.id === e.to)
       if (!a || !b) continue
-      const ax = a.x! + a.w! / 2, ay = a.y! + a.h! / 2
-      const bx = b.x! + b.w! / 2, by = b.y! + b.h! / 2
-      const p1 = this.borderPt(a, bx, by)
-      const p2 = this.borderPt(b, ax, ay)
-      const dy = p2.y - p1.y, dx = p2.x - p1.x
-      const useVertical = Math.abs(dy) > Math.abs(dx) * 0.3
-      const pts: Pt[] = useVertical
-        ? [{ x: p1.x, y: p1.y }, { x: p1.x, y: (p1.y + p2.y) / 2 }, { x: p2.x, y: (p1.y + p2.y) / 2 }, { x: p2.x, y: p2.y }]
-        : [{ x: p1.x, y: p1.y }, { x: (p1.x + p2.x) / 2, y: p1.y }, { x: (p1.x + p2.x) / 2, y: p2.y }, { x: p2.x, y: p2.y }]
+      const pts = this.edgePath(a, b, e)
       const tol = 6
       for (let i = 0; i < pts.length - 1; i++) {
         const d = this.distToSegment(wx, wy, pts[i], pts[i + 1])
@@ -1020,6 +1140,12 @@ export class CanvasRenderer implements DrawAPI {
 
     if (this.tempEdge) {
       this.tempEdge.toPt = { x: wx, y: wy }
+      return
+    }
+
+    if (this.dragWaypoint) {
+      const w = this.dragWaypoint
+      this.editor?.moveWaypointSilent(w.from, w.to, w.index, { x: wx, y: wy })
       return
     }
 
@@ -1065,6 +1191,14 @@ export class CanvasRenderer implements DrawAPI {
         }
       }
       this.tempEdge = null
+      return
+    }
+
+    if (this.dragWaypoint) {
+      this.dragWaypoint = null
+      this.loadStateToWasm(this.editor!.state)
+      window.dispatchEvent(new CustomEvent('editor-state-change'))
+      this.canvas.style.cursor = 'grab'
       return
     }
 

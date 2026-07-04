@@ -3,6 +3,7 @@ const diagrams = [
   { value: 'traffic', label: 'Traffic light' },
   { value: 'approval', label: 'Approval flow' },
   { value: 'checkout', label: 'Order checkout' },
+  { value: 'turnstile', label: 'Turnstile (state machine)' },
 ]
 
 const themes = [
@@ -11,16 +12,22 @@ const themes = [
   { value: 'contrast', label: 'Contrast' },
 ]
 
+type Mode = 'view' | 'edit' | 'simulate'
+
 interface TopBarProps {
   diagram: string
   theme: string
-  mode: 'view' | 'edit'
+  mode: Mode
+  graphType: 'flowchart' | 'statemachine'
   onDiagramChange: (name: string) => void
   onThemeChange: (name: string) => void
-  onModeChange: (mode: 'view' | 'edit') => void
+  onModeChange: (mode: Mode) => void
+  onTypeChange: (t: 'flowchart' | 'statemachine') => void
 }
 
-export function TopBar({ diagram, theme, mode, onDiagramChange, onThemeChange, onModeChange }: TopBarProps) {
+const MODES: Mode[] = ['view', 'edit', 'simulate']
+
+export function TopBar({ diagram, theme, mode, graphType, onDiagramChange, onThemeChange, onModeChange, onTypeChange }: TopBarProps) {
   return (
     <div className="panel topbar">
       <span className="brand">ff<span>·</span>viewer</span>
@@ -44,24 +51,38 @@ export function TopBar({ diagram, theme, mode, onDiagramChange, onThemeChange, o
       </div>
       <div className="divider" />
       <div className="field">
+        <label htmlFor="gtype">Type</label>
+        <select id="gtype" value={graphType} onChange={(e) => onTypeChange(e.target.value as 'flowchart' | 'statemachine')}>
+          <option value="flowchart">Flowchart</option>
+          <option value="statemachine">State machine</option>
+        </select>
+      </div>
+      <div className="divider" />
+      <div className="field">
         <label>Mode</label>
-        <button
-          onClick={() => onModeChange(mode === 'view' ? 'edit' : 'view')}
-          style={{
-            background: mode === 'edit' ? 'var(--accent)' : 'none',
-            color: mode === 'edit' ? '#fff' : 'var(--text)',
-            border: '1px solid var(--line)',
-            borderRadius: 8,
-            padding: '5px 12px',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontFamily: 'var(--font-display)',
-            transition: 'background .15s, color .15s',
-          }}
-        >
-          {mode === 'view' ? 'View' : 'Edit'}
-        </button>
+        <div style={{ display: 'flex', gap: 2, background: 'color-mix(in srgb, var(--bg) 60%, transparent)', border: '1px solid var(--line)', borderRadius: 8, padding: 2 }}>
+          {MODES.map((m) => (
+            <button
+              key={m}
+              onClick={() => onModeChange(m)}
+              style={{
+                background: mode === m ? 'var(--accent)' : 'none',
+                color: mode === m ? '#fff' : 'var(--text)',
+                border: 'none',
+                borderRadius: 6,
+                padding: '4px 10px',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'var(--font-display)',
+                transition: 'background .15s, color .15s',
+                textTransform: 'capitalize',
+              }}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

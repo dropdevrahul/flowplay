@@ -1,4 +1,4 @@
-import type { NodeSpec, EdgeSpec, SubgraphSpec, DiagramState } from './types'
+import type { NodeSpec, EdgeSpec, SubgraphSpec, DiagramState, Pt } from './types'
 import { NODE_PALETTE } from '../theme'
 
 let nodeCounter = 0
@@ -6,7 +6,7 @@ let sgCounter = 0
 
 // examples may omit edges/subgraphs; the renderer iterates them unconditionally
 function normalize(s: DiagramState): DiagramState {
-  return { nodes: s.nodes ?? [], edges: s.edges ?? [], subgraphs: s.subgraphs ?? [] }
+  return { ...s, nodes: s.nodes ?? [], edges: s.edges ?? [], subgraphs: s.subgraphs ?? [] }
 }
 
 export class DiagramEditor {
@@ -124,6 +124,53 @@ export class DiagramEditor {
     this.snapshot()
     this.state = { nodes: [], edges: [], subgraphs: [] }
     this.selected = null
+    this.emit()
+  }
+
+  setGlobalFont(px: number): void {
+    this.snapshot()
+    this.state.fontSize = px
+    this.emit()
+  }
+
+  setType(t: 'flowchart' | 'statemachine'): void {
+    this.snapshot()
+    this.state.type = t
+    this.emit()
+  }
+
+  setVariables(vars: Record<string, number | string | boolean>): void {
+    this.snapshot()
+    this.state.variables = vars
+    this.emit()
+  }
+
+  private findEdge(from: string, to: string): EdgeSpec | undefined {
+    return this.state.edges.find((e) => e.from === from && e.to === to)
+  }
+
+  addWaypoint(from: string, to: string, index: number, pt: Pt): void {
+    const e = this.findEdge(from, to)
+    if (!e) return
+    this.snapshot()
+    const wp = e.waypoints ? [...e.waypoints] : []
+    wp.splice(index, 0, pt)
+    e.waypoints = wp
+    this.emit()
+  }
+
+  moveWaypointSilent(from: string, to: string, index: number, pt: Pt): void {
+    const e = this.findEdge(from, to)
+    if (!e || !e.waypoints || !e.waypoints[index]) return
+    e.waypoints[index] = pt
+  }
+
+  removeWaypoint(from: string, to: string, index: number): void {
+    const e = this.findEdge(from, to)
+    if (!e || !e.waypoints) return
+    this.snapshot()
+    e.waypoints.splice(index, 1)
+    if (e.waypoints.length === 0) delete e.waypoints
     this.emit()
   }
 

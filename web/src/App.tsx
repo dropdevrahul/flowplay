@@ -9,6 +9,8 @@ import { SidePanel } from './components/SidePanel'
 import { ToolPalette } from './components/ToolPalette'
 import { JsonEditor } from './components/JsonEditor'
 import { PropertyEditor } from './components/PropertyEditor'
+import { SimPanel } from './components/SimPanel'
+import { Simulation } from './renderer/sim'
 import { layoutDiagram, nodeSize } from './renderer/layout'
 
 const KEY_MAP: Record<string, number> = {
@@ -33,12 +35,14 @@ export function App() {
   })
   const [zoomPct, setZoomPct] = useState(100)
   const [error, setError] = useState('')
-  const [mode, setMode] = useState<'view' | 'edit'>('view')
+  const [mode, setMode] = useState<'view' | 'edit' | 'simulate'>('view')
   const [sideOpen, setSideOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'palette' | 'json' | 'props'>('palette')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [jsonError, setJsonError] = useState<string | null>(null)
-  const [editingLabel, setEditingLabel] = useState<{ id: string; x: number; y: number; w: number; h: number; label: string } | null>(null)
+  const [editingLabel, setEditingLabel] = useState<{ id: string; edge?: { from: string; to: string }; x: number; y: number; w: number; h: number; label: string } | null>(null)
+  const simRef = useRef<Simulation | null>(null)
+  const [simTick, setSimTick] = useState(0)
 
   const editor = editorRef.current
 
@@ -51,11 +55,13 @@ export function App() {
     r.onError = setError
     r.onSelectionChange = setSelectedId
     r.onDoubleClick = handleDoubleClick
+    r.onEdgeDoubleClick = handleEdgeDoubleClick
     r.init(canvas, themeName).then(() => {
       r.loadDiagram(diagram)
     })
     return () => {
       r.onDoubleClick = null
+      r.onEdgeDoubleClick = null
       r.destroy()
       rendererRef.current = null
     }
@@ -79,7 +85,8 @@ export function App() {
 
   useEffect(() => {
     if (!rendererRef.current) return
-    rendererRef.current.editMode = mode === 'edit'
+    rendererRef.current.editMode = mode !== 'view'
+    rendererRef.current.simMode = mode === 'simulate'
   }, [mode])
 
   useEffect(() => {
@@ -128,6 +135,13 @@ export function App() {
         const ed = new DiagramEditor(spec)
         editorRef.current = ed
       }
+      // rebuild the simulation if we loaded a new diagram while simulating
+      if (rendererRef.current?.simMode && editorRef.current) {
+        const sim = new Simulation(editorRef.current.state)
+        simRef.current = sim
+        rendererRef.current.simulation = sim
+        setSimTick((t) => t + 1)
+      }
     } catch {}
   }, [])
 
@@ -151,19 +165,40 @@ export function App() {
     rendererRef.current?.setTheme(name)
   }, [])
 
-  const handleModeChange = useCallback((newMode: 'view' | 'edit') => {
+  const handleModeChange = useCallback((newMode: 'view' | 'edit' | 'simulate') => {
     setMode(newMode)
-    setSideOpen(newMode === 'edit')
-    if (rendererRef.current) {
-      rendererRef.current.editMode = newMode === 'edit'
-      rendererRef.current.editor = newMode === 'edit' ? editorRef.current : null
-      if (editorRef.current) {
-        rendererRef.current.loadStateToWasm(editorRef.current.state)
-        if (newMode === 'view') {
-          rendererRef.current.resetView()
-        }
-      }
+    setSideOpen(newMode !== 'view')
+    const r = rendererRef.current
+    if (!r) return
+    r.editMode = newMode !== 'view'
+    r.simMode = newMode === 'simulate'
+    r.editor = newMode !== 'view' ? editorRef.current : null
+    if (newMode === 'simulate' && editorRef.current) {
+      const sim = new Simulation(editorRef.current.state)
+      simRef.current = sim
+      r.simulation = sim
+      setSelectedId(null)
+      setSimTick((t) => t + 1)
+    } else {
+      r.simulation = null
     }
+    if (editorRef.current) r.loadStateToWasm(editorRef.current.state)
+    if (newMode === 'view') r.resetView()
+  }, [])
+
+  const handleFire = useCallback((event: string) => {
+    simRef.current?.fire(event)
+    setSimTick((t) => t + 1)
+  }, [])
+
+  const handleStep = useCallback(() => {
+    simRef.current?.step()
+    setSimTick((t) => t + 1)
+  }, [])
+
+  const handleSimReset = useCallback(() => {
+    simRef.current?.reset()
+    setSimTick((t) => t + 1)
   }, [])
 
   const handleZoomIn = useCallback(() => rendererRef.current?.zoomIn(), [])
@@ -272,6 +307,16 @@ export function App() {
     emitState()
   }, [emitState])
 
+  const handleGlobalFont = useCallback((px: number) => {
+    editorRef.current?.setGlobalFont(px)
+    emitState()
+  }, [emitState])
+
+  const handleTypeChange = useCallback((t: 'flowchart' | 'statemachine') => {
+    editorRef.current?.setType(t)
+    emitState()
+  }, [emitState])
+
   const handleClear = useCallback(() => {
     const ed = editorRef.current
     if (!ed || ed.state.nodes.length === 0) return
@@ -317,6 +362,40 @@ export function App() {
     })
   }, [])
 
+  const handleEdgeDoubleClick = useCallback((from: string, to: string, screenX: number, screenY: number) => {
+    const ed = editorRef.current
+    if (!ed) return
+    const edge = ed.state.edges.find((e) => e.from === from && e.to === to)
+    if (!edge) return
+    const rect = canvasRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const sm = ed.state.type === 'statemachine'
+    const cur = sm ? (edge.event ?? '') : (edge.label ?? '')
+    setEditingLabel({
+      id: `edge:${from}→${to}`,
+      edge: { from, to },
+      x: screenX - 70,
+      y: screenY - rect.top - 14,
+      w: 140,
+      h: 28,
+      label: cur,
+    })
+  }, [])
+
+  const commitLabel = useCallback((value: string) => {
+    const el = editingLabel
+    if (!el) return
+    const ed = editorRef.current
+    if (el.edge) {
+      const sm = ed?.state.type === 'statemachine'
+      ed?.updateEdge(el.edge.from, el.edge.to, sm ? { event: value } : { label: value })
+    } else {
+      ed?.updateNode(el.id, { label: value })
+    }
+    emitState()
+    setEditingLabel(null)
+  }, [editingLabel, emitState])
+
   const handleTogglePanel = useCallback(() => setSideOpen((o) => !o), [])
 
   const selectionType = editor?.getSelectionType() ?? null
@@ -326,7 +405,9 @@ export function App() {
 
   // hint text
   const hint = mode === 'edit'
-    ? '<kbd>Del</kbd> delete · <kbd>Ctrl+Z</kbd> undo · drag node to move · drag port to connect'
+    ? '<kbd>Del</kbd> delete · <kbd>Ctrl+Z</kbd> undo · drag node to move · drag port to connect · dbl-click to rename'
+    : mode === 'simulate'
+    ? 'Fire events in the panel · <kbd>Step</kbd> auto-advance · <kbd>Reset</kbd> · scroll to zoom · drag to pan'
     : '<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> pick path · <kbd>R</kbd> restart · scroll to zoom · drag to pan'
 
   return (
@@ -337,9 +418,11 @@ export function App() {
         diagram={diagram}
         theme={themeName}
         mode={mode}
+        graphType={editor?.state.type ?? 'flowchart'}
         onDiagramChange={handleDiagramChange}
         onThemeChange={handleThemeChange}
         onModeChange={handleModeChange}
+        onTypeChange={handleTypeChange}
       />
 
       <ZoomBar
@@ -350,6 +433,10 @@ export function App() {
       />
 
       <SidePanel open={sideOpen} onToggle={handleTogglePanel}>
+        {mode === 'simulate' && simRef.current ? (
+          <SimPanel sim={simRef.current} tick={simTick} onFire={handleFire} onStep={handleStep} onReset={handleSimReset} />
+        ) : (
+        <>
         <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: '1px solid var(--line)', paddingBottom: 4 }}>
           {(['palette', 'json', 'props'] as const).map((tab) => (
             <button
@@ -386,6 +473,8 @@ export function App() {
             onRedo={handleRedo}
             canUndo={editor?.canUndo() ?? false}
             canRedo={editor?.canRedo() ?? false}
+            fontSize={editor?.state.fontSize ?? 16}
+            onFontChange={handleGlobalFont}
           />
         )}
 
@@ -404,7 +493,10 @@ export function App() {
             onEdgeReconnect={handleEdgeReconnect}
             onSubgraphUpdate={handleSubgraphUpdate}
             allNodes={editor?.state.nodes ?? []}
+            isStateMachine={editor?.state.type === 'statemachine'}
           />
+        )}
+        </>
         )}
       </SidePanel>
 
@@ -437,18 +529,12 @@ export function App() {
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
-              editorRef.current?.updateNode(editingLabel.id, { label: e.currentTarget.value })
-              emitState()
-              setEditingLabel(null)
+              commitLabel(e.currentTarget.value)
             } else if (e.key === 'Escape') {
               setEditingLabel(null)
             }
           }}
-          onBlur={(e) => {
-            editorRef.current?.updateNode(editingLabel.id, { label: e.target.value })
-            emitState()
-            setEditingLabel(null)
-          }}
+          onBlur={(e) => commitLabel(e.target.value)}
         />
       )}
     </>
