@@ -1,0 +1,18 @@
+{
+  "nodes": [
+    { "id": "start", "kind": "ellipse", "x": 360, "y": 24, "w": 130, "h": 56, "label": "Start" },
+    { "id": "load", "x": 350, "y": 130, "label": "Loading" },
+    { "id": "check", "kind": "diamond", "x": 350, "y": 240, "w": 150, "h": 96, "label": "OK?" },
+    { "id": "ok", "x": 150, "y": 380, "label": "Success" },
+    { "id": "err", "x": 560, "y": 380, "label": "Error" }
+  ],
+  "edges": [
+    { "from": "start", "to": "load" },
+    { "from": "load", "to": "check" },
+    { "from": "check", "to": "ok", "label": "yes" },
+    { "from": "check", "to": "err", "label": "no" },
+    { "from": "ok", "to": "start" },
+    { "from": "err", "to": "start" }
+  ],
+  "play": ["start", "load", "check", "ok", "start"]
+}

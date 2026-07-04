@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+
+# build output / caches
+web/dist/
+zig-out/
+.zig-cache/
+
+# local tooling data
+.nexum-data/
+web/.nexum-data/
+.superpowers/
+.claude/
+
+# os
+.DS_Store

@@ -1,0 +1,17 @@
+{
+  "nodes": [
+    { "id": "draft", "kind": "ellipse", "x": 360, "y": 20, "w": 130, "h": 54, "label": "Draft" },
+    { "id": "submit", "x": 350, "y": 120, "label": "Submit" },
+    { "id": "review", "kind": "diamond", "x": 350, "y": 225, "w": 150, "h": 96, "label": "Approve?" },
+    { "id": "publish", "x": 150, "y": 370, "label": "Published" },
+    { "id": "reject", "x": 560, "y": 370, "label": "Rejected" }
+  ],
+  "edges": [
+    { "from": "draft", "to": "submit" },
+    { "from": "submit", "to": "review" },
+    { "from": "review", "to": "publish", "label": "yes" },
+    { "from": "review", "to": "reject", "label": "no" },
+    { "from": "reject", "to": "submit", "label": "revise" }
+  ],
+  "play": ["draft", "submit", "review", "reject", "submit", "review", "publish"]
+}

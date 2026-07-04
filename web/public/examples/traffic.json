@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    { "id": "green", "kind": "ellipse", "x": 110, "y": 190, "w": 130, "h": 130, "label": "Green" },
+    { "id": "yellow", "kind": "ellipse", "x": 375, "y": 190, "w": 130, "h": 130, "label": "Yellow" },
+    { "id": "red", "kind": "ellipse", "x": 640, "y": 190, "w": 130, "h": 130, "label": "Red" }
+  ],
+  "edges": [
+    { "from": "green", "to": "yellow", "label": "go" },
+    { "from": "yellow", "to": "red", "label": "slow" },
+    { "from": "red", "to": "green", "label": "stop" }
+  ],
+  "play": ["green", "yellow", "red", "green"]
+}

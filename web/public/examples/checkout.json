@@ -1,0 +1,44 @@
+{
+  "nodes": [
+    { "id": "cart", "kind": "ellipse", "x": 360, "y": 10, "w": 130, "h": 54, "label": "Cart" },
+    { "id": "checkout", "x": 350, "y": 100, "label": "Checkout" },
+    { "id": "validate", "kind": "diamond", "x": 350, "y": 195, "w": 150, "h": 90, "label": "Valid?" },
+    { "id": "payment", "x": 350, "y": 300, "label": "Payment" },
+    { "id": "auth", "kind": "diamond", "x": 350, "y": 400, "w": 150, "h": 90, "label": "Auth OK?" },
+    { "id": "inventory", "x": 350, "y": 510, "label": "Reserve" },
+    { "id": "stock", "kind": "diamond", "x": 350, "y": 610, "w": 150, "h": 90, "label": "In Stock?" },
+    { "id": "ship", "x": 100, "y": 610, "label": "Shipping" },
+    { "id": "backorder", "x": 600, "y": 610, "label": "Backorder" },
+    { "id": "fulfill", "x": 100, "y": 730, "label": "Fulfilled" },
+    { "id": "restock", "x": 600, "y": 730, "label": "Restock" },
+    { "id": "cancel", "x": 100, "y": 510, "label": "Cancel" },
+    { "id": "refund", "x": 100, "y": 400, "label": "Refund" },
+    { "id": "notify_ship", "x": 100, "y": 510, "w": 130, "h": 54, "label": "Notify" },
+    { "id": "done", "kind": "ellipse", "x": 360, "y": 830, "w": 130, "h": 54, "label": "Done" },
+    { "id": "fraud_check", "kind": "diamond", "x": 150, "y": 300, "w": 150, "h": 90, "label": "Fraud?" }
+  ],
+  "subgraphs": [
+    { "id": "payment", "label": "Payment", "nodes": ["payment", "fraud_check", "auth", "refund", "cancel"] },
+    { "id": "fulfillment", "label": "Fulfillment", "nodes": ["inventory", "stock", "ship", "backorder", "fulfill", "restock"] }
+  ],
+  "edges": [
+    { "from": "cart", "to": "checkout", "label": "proceed" },
+    { "from": "checkout", "to": "validate", "label": "submit" },
+    { "from": "validate", "to": "cart", "label": "invalid" },
+    { "from": "validate", "to": "payment", "label": "valid" },
+    { "from": "payment", "to": "fraud_check", "label": "process" },
+    { "from": "fraud_check", "to": "cancel", "label": "flagged" },
+    { "from": "fraud_check", "to": "auth", "label": "clear" },
+    { "from": "auth", "to": "refund", "label": "declined" },
+    { "from": "auth", "to": "inventory", "label": "approved" },
+    { "from": "inventory", "to": "stock", "label": "check" },
+    { "from": "stock", "to": "ship", "label": "available" },
+    { "from": "stock", "to": "backorder", "label": "out" },
+    { "from": "ship", "to": "fulfill", "label": "delivered" },
+    { "from": "fulfill", "to": "done", "label": "complete" },
+    { "from": "backorder", "to": "restock", "label": "reorder" },
+    { "from": "restock", "to": "ship", "label": "arrived" },
+    { "from": "cancel", "to": "refund", "label": "process" },
+    { "from": "refund", "to": "done", "label": "complete" }
+  ]
+}

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ff-viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --panel: #ffffff;
+      --line: #e2e6ee;
+      --text: #1a1e28;
+      --muted: #6b7485;
+      --accent: #3b82f6;
+      --font-display: 'Geist', system-ui, -apple-system, sans-serif;
+      --font-mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-display);
+      -webkit-font-smoothing: antialiased;
+    }
+    #c {
+      position: fixed;
+      inset: 0;
+      display: block;
+    }
+    .panel {
+      position: fixed;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: color-mix(in srgb, var(--panel) 82%, transparent);
+      -webkit-backdrop-filter: blur(12px) saturate(1.2);
+      backdrop-filter: blur(12px) saturate(1.2);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+      border-radius: 12px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+    .topbar {
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+    }
+    .brand {
+      font-weight: 600;
+      font-size: 14px;
+      letter-spacing: -0.02em;
+      padding-right: 4px;
+      color: var(--text);
+    }
+    .brand span { color: var(--accent); }
+    .divider { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
+    .field { display: flex; align-items: center; gap: 7px; }
+    .field label {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    select {
+      appearance: none;
+      background: color-mix(in srgb, var(--bg) 60%, transparent);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 5px 26px 5px 10px;
+      font-family: var(--font-display);
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 3.5L5 6.5L8 3.5' stroke='%239096a1' stroke-width='1.3' fill='none' stroke-linecap='round'/></svg>");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      transition: border-color .15s;
+    }
+    select:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+    select:focus { outline: none; border-color: var(--accent); }
+    .zoombar {
+      right: 16px;
+      bottom: 16px;
+      padding: 5px 6px;
+      gap: 2px;
+    }
+    .zoombar button {
+      background: transparent;
+      color: var(--text);
+      border: none;
+      border-radius: 7px;
+      width: 30px;
+      height: 30px;
+      font-size: 17px;
+      font-family: var(--font-display);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .12s;
+    }
+    .zoombar button#zoomReset { width: auto; padding: 0 12px; font-size: 12px; font-weight: 500; }
+    .zoombar button:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+    #zoomPct {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      min-width: 46px;
+      text-align: center;
+      user-select: none;
+    }
+    .zoombar .divider { height: 18px; }
+    .hint {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      z-index: 10;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      opacity: 0.5;
+      user-select: none;
+    }
+    .hint kbd {
+      font-family: var(--font-mono);
+      background: color-mix(in srgb, var(--panel) 70%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 0 4px;
+      color: var(--text);
+    }
+    #err {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 46px;
+      z-index: 11;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #ef4444;
+      opacity: 0;
+      transition: opacity .2s;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
