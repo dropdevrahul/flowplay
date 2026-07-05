@@ -6,6 +6,8 @@
 
 **Flowplay** is a lightweight, interactive diagram player for flowcharts and state machines. Describe your diagram as JSON — Flowplay renders it with smooth animated transitions, curved edges, and an in-browser editor. Powered by **Zig** + **WASM** + **Canvas2D**.
 
+**▶ [Live demo](https://dropdevrahul.github.io/flowplay/)** — try it in your browser, no install.
+
 - **Zero runtime dependencies** — the core is a single `.wasm` binary
 - **No build step for authors** — write JSON, hit refresh
 - **Dual mode** — view animated playback or edit visually in the browser
