@@ -21,7 +21,7 @@ export function createWasmEnv(draw: DrawAPI): WebAssembly.Imports {
 }
 
 export async function instantiateWasm(draw: DrawAPI): Promise<WebAssembly.Instance> {
-  const resp = await fetch('/runtime.wasm')
+  const resp = await fetch(`${import.meta.env.BASE_URL}runtime.wasm`)
   const env = createWasmEnv(draw)
   const { instance } = await WebAssembly.instantiate(await resp.arrayBuffer(), env)
   return instance

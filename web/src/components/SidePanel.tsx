@@ -21,9 +21,10 @@ export function SidePanel({ open, onToggle, children }: SidePanelProps) {
   return (
     <div style={{
       position: 'fixed',
-      top: 0,
+      // start below the floating top bar so its tabs never sit under it
+      top: 76,
       right: 0,
-      height: '100%',
+      height: 'calc(100% - 76px)',
       width: open ? 320 : 0,
       overflow: 'hidden',
       zIndex: 9,

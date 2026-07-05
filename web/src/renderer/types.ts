@@ -26,7 +26,8 @@ export interface EdgeSpec {
   actions?: string
   color?: number
   dashed?: boolean
-  route?: 'curved' | 'orthogonal'
+  route?: 'orthogonal' | 'straight' | 'curved'
+  arrow?: 'end' | 'both' | 'none'
   waypoints?: Pt[]
 }
 
@@ -41,6 +42,7 @@ export interface DiagramState {
   edges: EdgeSpec[]
   subgraphs: SubgraphSpec[]
   type?: 'flowchart' | 'statemachine'
+  dir?: 'TD' | 'BT' | 'LR' | 'RL'
   variables?: Record<string, number | string | boolean>
   fontSize?: number
 }

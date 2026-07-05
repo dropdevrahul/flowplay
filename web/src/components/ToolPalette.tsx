@@ -11,6 +11,8 @@ interface ToolPaletteProps {
   canRedo: boolean
   fontSize: number
   onFontChange: (px: number) => void
+  onRelayout: (dir: 'TD' | 'BT' | 'LR' | 'RL') => void
+  dir: 'TD' | 'BT' | 'LR' | 'RL'
 }
 
 const NODE_TYPES: { kind: string; label: string; shape: React.ReactNode }[] = [
@@ -18,6 +20,11 @@ const NODE_TYPES: { kind: string; label: string; shape: React.ReactNode }[] = [
   { kind: 'rect', label: 'State', shape: <rect x="4" y="6" width="46" height="26" /> },
   { kind: 'ellipse', label: 'Start / End', shape: <ellipse cx="27" cy="19" rx="23" ry="13" /> },
   { kind: 'diamond', label: 'Decision', shape: <polygon points="27,4 50,19 27,34 4,19" /> },
+  { kind: 'stadium', label: 'Pill', shape: <rect x="4" y="7" width="46" height="24" rx="12" /> },
+  { kind: 'cylinder', label: 'Database', shape: <path d="M6 11 a21 5 0 0 1 42 0 v16 a21 5 0 0 1 -42 0 z M6 11 a21 5 0 0 0 42 0" /> },
+  { kind: 'hexagon', label: 'Prepare', shape: <polygon points="14,6 40,6 50,19 40,32 14,32 4,19" /> },
+  { kind: 'parallelogram', label: 'Input / IO', shape: <polygon points="12,6 50,6 42,32 4,32" /> },
+  { kind: 'circle', label: 'Connector', shape: <circle cx="27" cy="19" r="13" /> },
 ]
 
 const heading: React.CSSProperties = {
@@ -48,7 +55,12 @@ function hover(on: boolean, color = 'var(--accent)') {
   }
 }
 
-export function ToolPalette({ onAddNode, onConnect, onAddSubgraph, onDuplicate, onDelete, onClear, onUndo, onRedo, canUndo, canRedo, fontSize, onFontChange }: ToolPaletteProps) {
+const DIRS: { d: 'TD' | 'BT' | 'LR' | 'RL'; label: string }[] = [
+  { d: 'TD', label: '↓ Down' }, { d: 'LR', label: '→ Right' },
+  { d: 'BT', label: '↑ Up' }, { d: 'RL', label: '← Left' },
+]
+
+export function ToolPalette({ onAddNode, onConnect, onAddSubgraph, onDuplicate, onDelete, onClear, onUndo, onRedo, canUndo, canRedo, fontSize, onFontChange, onRelayout, dir }: ToolPaletteProps) {
   return (
     <div>
       <div style={heading}>Nodes</div>
@@ -75,6 +87,16 @@ export function ToolPalette({ onAddNode, onConnect, onAddSubgraph, onDuplicate, 
         <button style={canUndo ? act : actOff} onClick={canUndo ? onUndo : undefined}>Undo</button>
         <button style={canRedo ? act : actOff} onClick={canRedo ? onRedo : undefined}>Redo</button>
         <button style={act} onClick={onClear} onMouseEnter={hover(true, '#ef4444')} onMouseLeave={hover(false)}>Clear</button>
+      </div>
+
+      <div style={{ ...heading, marginTop: 18 }}>Auto Layout</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6 }}>
+        {DIRS.map((x) => (
+          <button key={x.d} onClick={() => onRelayout(x.d)} onMouseEnter={hover(true)} onMouseLeave={hover(false)}
+            style={{ ...act, background: x.d === dir ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'none', borderColor: x.d === dir ? 'var(--accent)' : 'var(--line)' }}>
+            {x.label}
+          </button>
+        ))}
       </div>
 
       <div style={{ ...heading, marginTop: 18 }}>Text</div>
