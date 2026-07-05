@@ -596,10 +596,8 @@ export class CanvasRenderer implements DrawAPI {
     if (this.boxSelect) this.drawBoxSelect()
     if (this.dragNode && (this.guides.x !== undefined || this.guides.y !== undefined)) this.drawGuides()
 
-    if (!this.simMode) {
-      this.readTransitions()
-      this.drawPills()
-    }
+    // WASM transition pills are a view-mode affordance; the editor has its own
+    // affordances, so don't overlay (stale) pills in edit/simulate.
   }
 
   private drawNodeFromState(n: NodeSpec, selected: boolean) {
@@ -642,6 +640,33 @@ export class CanvasRenderer implements DrawAPI {
     ctx.lineWidth = selected ? 3 : 1.5
     ctx.strokeStyle = selected ? c.accent : (n.stroke !== undefined ? hexU32(n.stroke) : c.nodeStroke)
     ctx.stroke()
+
+    // state-machine role markers (UML-ish): initial = entry dot + arrow, final = double ring
+    if (n.role === 'final') {
+      ctx.lineWidth = 1.5
+      ctx.strokeStyle = selected ? c.accent : (n.stroke !== undefined ? hexU32(n.stroke) : c.nodeStroke)
+      this.nodePath(k, sx + 5, sy + 5, sw - 10, sh - 10)
+      ctx.stroke()
+    } else if (n.role === 'initial') {
+      const dotX = sx - 20, dotY = cy
+      ctx.fillStyle = selected ? c.accent : (n.stroke !== undefined ? hexU32(n.stroke) : c.nodeStroke)
+      ctx.beginPath()
+      ctx.arc(dotX, dotY, 5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = ctx.fillStyle
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(dotX + 5, dotY)
+      ctx.lineTo(sx - 2, dotY)
+      ctx.stroke()
+      // arrowhead into the node
+      ctx.beginPath()
+      ctx.moveTo(sx, dotY)
+      ctx.lineTo(sx - 6, dotY - 4)
+      ctx.lineTo(sx - 6, dotY + 4)
+      ctx.closePath()
+      ctx.fill()
+    }
     ctx.restore()
 
     if (n.label) {

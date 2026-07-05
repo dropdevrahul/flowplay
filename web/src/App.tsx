@@ -503,6 +503,14 @@ export function App() {
     emitState()
   }, [emitState])
 
+  const handleSetRole = useCallback((role: 'initial' | 'normal' | 'final') => {
+    const ed = editorRef.current
+    if (!ed) return
+    const ids = ed.selectedNodes.size ? [...ed.selectedNodes] : ed.selected ? [ed.selected] : []
+    for (const id of ids) ed.updateNode(id, { role })
+    emitState()
+  }, [emitState])
+
   const handleBringFront = useCallback(() => {
     const ed = editorRef.current
     if (!ed || !ed.selectedNodes.size) return
@@ -757,6 +765,7 @@ export function App() {
         <ContextMenu
           x={menu.x} y={menu.y} kind={menu.kind}
           canPaste={!!clipboardRef.current?.nodes.length}
+          isStateMachine={editor?.state.type === 'statemachine'}
           onClose={() => setMenu(null)}
           onCopy={copySelection}
           onPaste={pasteClipboard}
@@ -764,6 +773,7 @@ export function App() {
           onDelete={handleDelete}
           onBringFront={handleBringFront}
           onSendBack={handleSendBack}
+          onSetRole={handleSetRole}
         />
       )}
 
@@ -809,10 +819,11 @@ export function App() {
   )
 }
 
-function ContextMenu({ x, y, kind, canPaste, onClose, onCopy, onPaste, onDuplicate, onDelete, onBringFront, onSendBack }: {
-  x: number; y: number; kind: 'node' | 'edge' | 'canvas'; canPaste: boolean
+function ContextMenu({ x, y, kind, canPaste, isStateMachine, onClose, onCopy, onPaste, onDuplicate, onDelete, onBringFront, onSendBack, onSetRole }: {
+  x: number; y: number; kind: 'node' | 'edge' | 'canvas'; canPaste: boolean; isStateMachine: boolean
   onClose: () => void; onCopy: () => void; onPaste: () => void; onDuplicate: () => void
   onDelete: () => void; onBringFront: () => void; onSendBack: () => void
+  onSetRole: (role: 'initial' | 'normal' | 'final') => void
 }) {
   useEffect(() => {
     const close = () => onClose()
@@ -849,6 +860,10 @@ function ContextMenu({ x, y, kind, canPaste, onClose, onCopy, onPaste, onDuplica
       {isNode && item('Duplicate  ⌘D', onDuplicate)}
       {isNode && item('Copy  ⌘C', onCopy)}
       {item('Paste  ⌘V', onPaste, false, !canPaste)}
+      {isNode && isStateMachine && sep}
+      {isNode && isStateMachine && item('Mark as initial ●', () => onSetRole('initial'))}
+      {isNode && isStateMachine && item('Mark as final ◉', () => onSetRole('final'))}
+      {isNode && isStateMachine && item('Mark as normal', () => onSetRole('normal'))}
       {isNode && sep}
       {isNode && item('Bring to front', onBringFront)}
       {isNode && item('Send to back', onSendBack)}
