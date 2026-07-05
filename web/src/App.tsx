@@ -9,6 +9,7 @@ import { SidePanel } from './components/SidePanel'
 import { ToolPalette } from './components/ToolPalette'
 import { JsonEditor } from './components/JsonEditor'
 import { PropertyEditor } from './components/PropertyEditor'
+import { VariablesEditor } from './components/VariablesEditor'
 import { SimPanel } from './components/SimPanel'
 import { Simulation } from './renderer/sim'
 import { layoutDiagram, nodeSize } from './renderer/layout'
@@ -472,6 +473,11 @@ export function App() {
     emitState()
   }, [emitState])
 
+  const handleVariablesChange = useCallback((vars: Record<string, number | string | boolean>) => {
+    editorRef.current?.setVariables(vars)
+    emitState()
+  }, [emitState])
+
   const handleTypeChange = useCallback((t: 'flowchart' | 'statemachine') => {
     editorRef.current?.setType(t)
     emitState()
@@ -699,6 +705,12 @@ export function App() {
             onDeleteDiagram={handleDeleteDiagram}
             isSaved={!isTemplate(diagram) && savedList.includes(diagram)}
           />
+        )}
+
+        {activeTab === 'palette' && (
+          <div style={{ marginTop: 18, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+            <VariablesEditor variables={editor?.state.variables ?? {}} onChange={handleVariablesChange} />
+          </div>
         )}
 
         {activeTab === 'json' && (
