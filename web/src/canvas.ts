@@ -75,6 +75,8 @@ export class CanvasRenderer implements DrawAPI {
   onDoubleClick: ((nodeId: string, screenX: number, screenY: number) => void) | null = null
   onEdgeDoubleClick: ((from: string, to: string, screenX: number, screenY: number) => void) | null = null
   onContextMenu: ((screenX: number, screenY: number, kind: 'node' | 'edge' | 'canvas') => void) | null = null
+  onSimAdvance: ((toNodeId: string) => void) | null = null
+  onSimSelectEntity: ((entityId: string) => void) | null = null
 
   private boundResize: () => void
   private boundWheel: (e: WheelEvent) => void
@@ -266,6 +268,16 @@ export class CanvasRenderer implements DrawAPI {
     const ptr = (this.instance.exports as any).jsonPtr() as number
     new Uint8Array(this.mem.buffer, ptr, json.length).set(new TextEncoder().encode(json))
     ;(this.instance.exports as any).loadJson(json.length)
+  }
+
+  // load an in-memory diagram for VIEW-mode playback (saved/imported diagrams
+  // that aren't fetchable files). Mirrors loadDiagram minus the network fetch.
+  loadDiagramState(state: import('./renderer/types').DiagramState) {
+    if (!this.instance) return
+    this.trail = []
+    this.loadStateToWasm(state)
+    this.startLoop()
+    this.resetView()
   }
 
   // arm click-to-connect from the selected node; returns false if nothing is selected
@@ -518,7 +530,9 @@ export class CanvasRenderer implements DrawAPI {
       this.drawSubgraphFromState(sg)
     }
 
-    const simActive = this.simMode ? this.simulation?.active ?? null : null
+    const sim = this.simMode ? this.simulation : null
+    const simActive = sim?.active ?? null
+    const occupied = new Set<string>(sim?.entities.map((e) => e.at) ?? [])
 
     if (!this.simMode && ed.selected && ed.getSelectionType() === 'subgraph') {
       const selSg = ed.getSelectedSubgraph()
@@ -564,9 +578,11 @@ export class CanvasRenderer implements DrawAPI {
     }
 
     for (const n of state.nodes) {
-      const isSel = this.simMode ? n.id === simActive : ed.isNodeSelected(n.id)
+      const isSel = this.simMode ? occupied.has(n.id) : ed.isNodeSelected(n.id)
       this.drawNodeFromState(n, isSel)
     }
+
+    if (sim) this.drawSimTokens(sim, simActive)
 
     if (!this.simMode && ed.selected && ed.getSelectionType() === 'node') {
       const primary = state.nodes.find((n) => n.id === ed.selected)
@@ -580,10 +596,8 @@ export class CanvasRenderer implements DrawAPI {
     if (this.boxSelect) this.drawBoxSelect()
     if (this.dragNode && (this.guides.x !== undefined || this.guides.y !== undefined)) this.drawGuides()
 
-    if (!this.simMode) {
-      this.readTransitions()
-      this.drawPills()
-    }
+    // WASM transition pills are a view-mode affordance; the editor has its own
+    // affordances, so don't overlay (stale) pills in edit/simulate.
   }
 
   private drawNodeFromState(n: NodeSpec, selected: boolean) {
@@ -626,6 +640,33 @@ export class CanvasRenderer implements DrawAPI {
     ctx.lineWidth = selected ? 3 : 1.5
     ctx.strokeStyle = selected ? c.accent : (n.stroke !== undefined ? hexU32(n.stroke) : c.nodeStroke)
     ctx.stroke()
+
+    // state-machine role markers (UML-ish): initial = entry dot + arrow, final = double ring
+    if (n.role === 'final') {
+      ctx.lineWidth = 1.5
+      ctx.strokeStyle = selected ? c.accent : (n.stroke !== undefined ? hexU32(n.stroke) : c.nodeStroke)
+      this.nodePath(k, sx + 5, sy + 5, sw - 10, sh - 10)
+      ctx.stroke()
+    } else if (n.role === 'initial') {
+      const dotX = sx - 20, dotY = cy
+      ctx.fillStyle = selected ? c.accent : (n.stroke !== undefined ? hexU32(n.stroke) : c.nodeStroke)
+      ctx.beginPath()
+      ctx.arc(dotX, dotY, 5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = ctx.fillStyle
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(dotX + 5, dotY)
+      ctx.lineTo(sx - 2, dotY)
+      ctx.stroke()
+      // arrowhead into the node
+      ctx.beginPath()
+      ctx.moveTo(sx, dotY)
+      ctx.lineTo(sx - 6, dotY - 4)
+      ctx.lineTo(sx - 6, dotY + 4)
+      ctx.closePath()
+      ctx.fill()
+    }
     ctx.restore()
 
     if (n.label) {
@@ -648,6 +689,16 @@ export class CanvasRenderer implements DrawAPI {
     }
     const p1 = this.borderPt(a, bx, by)
     const p2 = this.borderPt(b, ax, ay)
+    // a reverse edge exists (A<->B) → bow both to opposite sides so they and
+    // their labels don't overlap. Deterministic side by comparing endpoint ids.
+    if (this.hasReverseEdge(edge)) {
+      const side = edge.from < edge.to ? 1 : -1
+      const dx0 = p2.x - p1.x, dy0 = p2.y - p1.y
+      const len = Math.hypot(dx0, dy0) || 1
+      const off = 26 * side
+      const mid = { x: (p1.x + p2.x) / 2 - (dy0 / len) * off, y: (p1.y + p2.y) / 2 + (dx0 / len) * off }
+      return [p1, mid, p2]
+    }
     // straight and curved both hit-test/draw against the direct segment
     if (route === 'straight' || route === 'curved') return [p1, p2]
     const dy = p2.y - p1.y, dx = p2.x - p1.x
@@ -659,13 +710,42 @@ export class CanvasRenderer implements DrawAPI {
     return [p1, { x: midX, y: p1.y }, { x: midX, y: p2.y }, p2]
   }
 
+  // after connecting two states in a state machine, immediately open the inline
+  // event editor on the new edge so authoring "A --EVENT--> B" is one gesture
+  private maybeEditNewEdge(from: string, to: string) {
+    const ed = this.editor
+    if (!ed || ed.state.type !== 'statemachine') return
+    const edge = ed.state.edges.find((e) => e.from === from && e.to === to)
+    const a = ed.state.nodes.find((n) => n.id === from)
+    const b = ed.state.nodes.find((n) => n.id === to)
+    if (!edge || !a || !b) return
+    ed.select('edge:' + from + '→' + to)
+    this.onSelectionChange?.('edge:' + from + '→' + to)
+    const path = this.edgePath(a, b, edge)
+    const m = Math.floor(path.length / 2)
+    const mid = path.length % 2 === 0
+      ? { x: (path[m - 1].x + path[m].x) / 2, y: (path[m - 1].y + path[m].y) / 2 }
+      : path[m]
+    const rect = this.canvas.getBoundingClientRect()
+    const sx = mid.x * this.cam.zoom + this.cam.x + rect.left
+    const sy = mid.y * this.cam.zoom + this.cam.y + rect.top
+    // defer to the next tick so the inline editor opens AFTER this click's
+    // mouseup/click settles — otherwise the fresh input is blurred immediately
+    setTimeout(() => this.onEdgeDoubleClick?.(from, to, sx, sy), 0)
+  }
+
+  private hasReverseEdge(edge: EdgeSpec): boolean {
+    return !!this.editor?.state.edges.some((e) => e.from === edge.to && e.to === edge.from)
+  }
+
   private drawEdgeFromState(a: NodeSpec, b: NodeSpec, edge: EdgeSpec, active: boolean) {
     const c = this.theme
     const ctx = this.ctx
     const path = this.edgePath(a, b, edge)
     const stroke = active ? c.accent : (edge.color !== undefined ? hexU32(edge.color) : c.edge)
 
-    const curved = (edge.route ?? 'orthogonal') === 'curved' && path.length >= 2
+    // bidirectional bow (3-pt) and explicit curved route both render smoothed
+    const curved = path.length >= 2 && ((edge.route ?? 'orthogonal') === 'curved' || (!edge.waypoints && this.hasReverseEdge(edge)))
     ctx.save()
     ctx.beginPath()
     ctx.moveTo(path[0].x, path[0].y)
@@ -898,6 +978,49 @@ export class CanvasRenderer implements DrawAPI {
       ctx.fill()
       ctx.stroke()
       ctx.restore()
+    }
+  }
+
+  // draw a token per simulation entity at its node; multiple entities on the
+  // same node fan out. The active entity's token is brighter with a ring.
+  private drawSimTokens(sim: import('./renderer/sim').Simulation, activeId: string | null) {
+    const ctx = this.ctx
+    const c = this.theme
+    // group entities by node so co-located tokens don't overlap
+    const byNode = new Map<string, typeof sim.entities>()
+    for (const e of sim.entities) {
+      const arr = byNode.get(e.at) ?? []
+      arr.push(e)
+      byNode.set(e.at, arr)
+    }
+    for (const [nid, ents] of byNode) {
+      const n = sim.state.nodes.find((x) => x.id === nid)
+      if (!n) continue
+      const cx = n.x! + n.w! / 2
+      const cy = n.y! + n.h! / 2
+      ents.forEach((e, i) => {
+        // fan tokens horizontally around the node center
+        const spread = (i - (ents.length - 1) / 2) * 20
+        const tx = cx + spread
+        const ty = cy
+        const isActive = e.at === sim.active && sim.activeEntityId === e.id
+        ctx.save()
+        ctx.shadowColor = c.accent
+        ctx.shadowBlur = isActive ? 14 : 6
+        ctx.fillStyle = c.accent
+        ctx.globalAlpha = isActive ? 1 : 0.55
+        ctx.beginPath()
+        ctx.arc(tx, ty, isActive ? 9 : 7, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.shadowColor = 'transparent'
+        // white highlight dot
+        ctx.globalAlpha = isActive ? 0.9 : 0.5
+        ctx.fillStyle = '#ffffff'
+        ctx.beginPath()
+        ctx.arc(tx - 2, ty - 2, isActive ? 3 : 2.4, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      })
     }
   }
 
@@ -1266,7 +1389,24 @@ export class CanvasRenderer implements DrawAPI {
 
   private onEditMouseDown(e: MouseEvent) {
     if (this.simMode) {
-      // simulate mode: pan only, no editing
+      // simulate mode: click an enabled next-node to advance the active token,
+      // or click another token's node to make that entity active; else pan.
+      const sim = this.simulation
+      if (sim && !this.spaceDown && e.button !== 1) {
+        const rect = this.canvas.getBoundingClientRect()
+        const wx = this.cam.worldX(e.clientX - rect.left)
+        const wy = this.cam.worldY(e.clientY - rect.top)
+        for (let i = sim.state.nodes.length - 1; i >= 0; i--) {
+          const n = sim.state.nodes[i]
+          if (!this.nodeInBounds(n, wx, wy)) continue
+          const targets = sim.enabledFor().map((t) => t.to)
+          if (targets.includes(n.id)) { this.onSimAdvance?.(n.id); return }
+          const ent = sim.entities.find((x) => x.at === n.id)
+          if (ent) { this.onSimSelectEntity?.(ent.id); return }
+          break
+        }
+      }
+      // otherwise pan
       this.dragging = true
       this.last = { x: e.clientX, y: e.clientY }
       this.canvas.style.cursor = 'grabbing'
@@ -1314,6 +1454,7 @@ export class CanvasRenderer implements DrawAPI {
           ed.addEdge(from, n.id)
           this.loadStateToWasm(ed.state)
           window.dispatchEvent(new CustomEvent('editor-state-change'))
+          this.maybeEditNewEdge(from, n.id)
           return
         }
       }
@@ -1466,6 +1607,13 @@ export class CanvasRenderer implements DrawAPI {
     const wx = this.cam.worldX(mx)
     const wy = this.cam.worldY(my)
 
+    // simulate mode: pointer cursor over an enabled next-node (unless dragging/panning)
+    if (this.simMode && !this.dragging && this.simulation) {
+      const targets = new Set(this.simulation.enabledFor().map((t) => t.to))
+      const hot = this.simulation.state.nodes.some((n) => targets.has(n.id) && this.nodeInBounds(n, wx, wy))
+      this.canvas.style.cursor = hot ? 'pointer' : 'grab'
+    }
+
     if (this.tempEdge) {
       this.tempEdge.toPt = { x: wx, y: wy }
       return
@@ -1570,9 +1718,11 @@ export class CanvasRenderer implements DrawAPI {
         for (const n of ed.state.nodes) {
           if (n.id === this.tempEdge.fromNode) continue
           if (this.nodeInBounds(n, mx, my)) {
-            ed.addEdge(this.tempEdge.fromNode, n.id)
+            const src = this.tempEdge.fromNode
+            ed.addEdge(src, n.id)
             this.loadStateToWasm(ed.state)
             window.dispatchEvent(new CustomEvent('editor-state-change'))
+            this.maybeEditNewEdge(src, n.id)
             break
           }
         }

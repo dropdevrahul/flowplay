@@ -9,9 +9,13 @@ import { SidePanel } from './components/SidePanel'
 import { ToolPalette } from './components/ToolPalette'
 import { JsonEditor } from './components/JsonEditor'
 import { PropertyEditor } from './components/PropertyEditor'
+import { VariablesEditor } from './components/VariablesEditor'
+import { DslPanel } from './components/DslPanel'
+import { toDSL } from './renderer/dsl'
 import { SimPanel } from './components/SimPanel'
 import { Simulation } from './renderer/sim'
 import { layoutDiagram, nodeSize } from './renderer/layout'
+import { listSaved, loadSaved, saveDiagram, deleteSaved, isTemplate, blankDiagram } from './renderer/storage'
 
 const KEY_MAP: Record<string, number> = {
   ' ': 32,
@@ -37,7 +41,7 @@ export function App() {
   const [error, setError] = useState('')
   const [mode, setMode] = useState<'view' | 'edit' | 'simulate'>('view')
   const [sideOpen, setSideOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'palette' | 'json' | 'props'>('palette')
+  const [activeTab, setActiveTab] = useState<'palette' | 'text' | 'json' | 'props'>('palette')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [editingLabel, setEditingLabel] = useState<{ id: string; edge?: { from: string; to: string }; x: number; y: number; w: number; h: number; label: string } | null>(null)
@@ -46,6 +50,8 @@ export function App() {
   const clipboardRef = useRef<{ nodes: NodeSpec[]; edges: EdgeSpec[] } | null>(null)
   const [selTick, setSelTick] = useState(0)
   const [menu, setMenu] = useState<{ x: number; y: number; kind: 'node' | 'edge' | 'canvas' } | null>(null)
+  const [savedList, setSavedList] = useState<string[]>(() => listSaved())
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const editor = editorRef.current
 
@@ -60,8 +66,18 @@ export function App() {
     r.onDoubleClick = handleDoubleClick
     r.onEdgeDoubleClick = handleEdgeDoubleClick
     r.onContextMenu = (x, y, kind) => setMenu({ x, y, kind })
+    r.onSimAdvance = (to) => {
+      const sim = simRef.current
+      if (!sim) return
+      const edge = sim.enabledFor().find((eg) => eg.to === to)
+      if (!edge) return
+      if (edge.event) sim.fire(edge.event)
+      else sim.fireTo(sim.activeEntityId, to)
+      setSimTick((x2) => x2 + 1)
+    }
+    r.onSimSelectEntity = (id) => { simRef.current?.selectEntity(id); setSimTick((x2) => x2 + 1) }
     r.init(canvas, themeName).then(() => {
-      r.loadDiagram(diagram)
+      loadTemplate(diagram)
     })
     return () => {
       r.onDoubleClick = null
@@ -80,6 +96,31 @@ export function App() {
         if (code != null) {
           rendererRef.current?.handleKey(code)
           e.preventDefault()
+        }
+      } else if (mode === 'simulate') {
+        const sim = simRef.current
+        if (!sim) return
+        const sm = editorRef.current?.state.type === 'statemachine'
+        // 1-9 pick the Nth event (state machine) or Nth branch (flowchart)
+        if (e.key >= '1' && e.key <= '9') {
+          const idx = +e.key - 1
+          if (sm) { const ev = sim.eventsFor()[idx]; if (ev !== undefined) { sim.fire(ev); setSimTick((x) => x + 1) } }
+          else { const c = sim.choices()[idx]; if (c) { sim.fireTo(sim.activeEntityId, c.to); setSimTick((x) => x + 1) } }
+          e.preventDefault()
+        } else if (e.key === ' ') {
+          sim.stepAll(); setSimTick((x) => x + 1); e.preventDefault()
+        } else if (e.key === 's' || e.key === 'S') {
+          sim.step(); setSimTick((x) => x + 1); e.preventDefault()
+        } else if (e.key === 'r' || e.key === 'R') {
+          sim.reset(); setSimTick((x) => x + 1); e.preventDefault()
+        } else if (e.key === 'n' || e.key === 'N') {
+          sim.spawn(); setSimTick((x) => x + 1); e.preventDefault()
+        } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && sim.entities.length > 1) {
+          // cycle the active entity
+          const ids = sim.entities.map((en) => en.id)
+          const cur = ids.indexOf(sim.activeEntityId)
+          const nx = e.key === 'ArrowDown' ? (cur + 1) % ids.length : (cur - 1 + ids.length) % ids.length
+          sim.selectEntity(ids[nx]); setSimTick((x) => x + 1); e.preventDefault()
         }
       }
     }
@@ -166,43 +207,108 @@ export function App() {
 
   // load JSON string for the JSON editor
   const [jsonStr, setJsonStr] = useState('')
-  const loadJsonStr = useCallback(async (name: string) => {
-    try {
-      const resp = await fetch(`${import.meta.env.BASE_URL}examples/${name}.json`)
-      const text = await resp.text()
-      const spec = JSON.parse(text) as DiagramState
-      layoutDiagram(spec)
-      setJsonStr(JSON.stringify(spec, null, 2))
-      if (editorRef.current) {
-        editorRef.current.load(spec)
-      } else {
-        const ed = new DiagramEditor(spec)
-        editorRef.current = ed
-      }
-      if (rendererRef.current) rendererRef.current.editor = editorRef.current
-      // rebuild the simulation if we loaded a new diagram while simulating
-      if (rendererRef.current?.simMode && editorRef.current) {
+
+  // apply a diagram spec into editor + renderer, regardless of current mode.
+  // reads mode flags off the renderer (not React state) to stay closure-stable.
+  const applySpec = useCallback((spec: DiagramState, name: string, relayout = false) => {
+    if (!spec.nodes) spec.nodes = []
+    if (relayout || spec.nodes.some((n) => n.x === undefined || n.y === undefined)) layoutDiagram(spec)
+    // backfill sizes so a partial spec (positions but no w/h) never yields NaN geometry
+    for (const n of spec.nodes) {
+      if (n.w === undefined || n.h === undefined) { const s = nodeSize(n.kind); n.w = n.w ?? s.w; n.h = n.h ?? s.h }
+    }
+    setJsonStr(JSON.stringify(spec, null, 2))
+    if (editorRef.current) editorRef.current.load(spec)
+    else editorRef.current = new DiagramEditor(spec)
+    const r = rendererRef.current
+    if (r) {
+      r.editor = editorRef.current
+      if (r.editMode) { r.loadStateToWasm(editorRef.current.state); r.resetView() }
+      else r.loadDiagramState(editorRef.current.state)
+      if (r.simMode) {
         const sim = new Simulation(editorRef.current.state)
         simRef.current = sim
-        rendererRef.current.simulation = sim
+        r.simulation = sim
         setSimTick((t) => t + 1)
       }
-    } catch {}
+    }
+    setDiagram(name)
+    setSelectedId(null)
+    setError('')
   }, [])
 
-  useEffect(() => {
-    loadJsonStr(diagram)
-  }, [diagram, loadJsonStr])
+  const loadTemplate = useCallback(async (name: string) => {
+    try {
+      const resp = await fetch(`${import.meta.env.BASE_URL}examples/${name}.json`)
+      const spec = JSON.parse(await resp.text()) as DiagramState
+      applySpec(spec, name, true)
+    } catch {}
+  }, [applySpec])
 
   const handleDiagramChange = useCallback((name: string) => {
+    if (isTemplate(name)) { loadTemplate(name); return }
+    const s = loadSaved(name)
+    if (s) applySpec(s, name)
+  }, [loadTemplate, applySpec])
+
+  const handleNew = useCallback(() => {
+    const t = editorRef.current?.state.type ?? 'flowchart'
+    applySpec(blankDiagram(t), 'Untitled')
+    setMode('edit')
+    setSideOpen(true)
+    const r = rendererRef.current
+    if (r) { r.editMode = true; r.simMode = false }
+  }, [applySpec])
+
+  const handleSaveDiagram = useCallback(() => {
+    const ed = editorRef.current
+    if (!ed) return
+    const suggested = isTemplate(diagram) ? '' : diagram
+    const name = window.prompt('Save diagram as:', suggested)?.trim()
+    if (!name) return
+    saveDiagram(name, ed.state)
+    setSavedList(listSaved())
     setDiagram(name)
-    setError('')
-    setSelectedId(null)
-    if (mode === 'view') {
-      rendererRef.current?.loadDiagram(name)
+  }, [diagram])
+
+  const handleDeleteDiagram = useCallback(() => {
+    if (isTemplate(diagram) || !loadSaved(diagram)) return
+    if (!window.confirm(`Delete saved diagram "${diagram}"?`)) return
+    deleteSaved(diagram)
+    setSavedList(listSaved())
+    handleNew()
+  }, [diagram, handleNew])
+
+  const handleImport = useCallback(() => fileInputRef.current?.click(), [])
+
+  const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const spec = JSON.parse(String(reader.result)) as DiagramState
+        applySpec(spec, file.name.replace(/\.json$/i, '') || 'Imported')
+      } catch {
+        setError('import failed: invalid JSON')
+        setTimeout(() => setError(''), 2500)
+      }
     }
-    loadJsonStr(name)
-  }, [mode, loadJsonStr])
+    reader.readAsText(file)
+  }, [applySpec])
+
+  const handleExportJson = useCallback(() => {
+    const ed = editorRef.current
+    if (!ed) return
+    const blob = new Blob([ed.toJSON()], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${diagram || 'diagram'}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [diagram])
 
   const handleThemeChange = useCallback((name: string) => {
     setThemeName(name)
@@ -233,20 +339,16 @@ export function App() {
     if (newMode === 'view') r.resetView()
   }, [])
 
-  const handleFire = useCallback((event: string) => {
-    simRef.current?.fire(event)
-    setSimTick((t) => t + 1)
-  }, [])
+  const bumpSim = useCallback(() => setSimTick((t) => t + 1), [])
 
-  const handleStep = useCallback(() => {
-    simRef.current?.step()
-    setSimTick((t) => t + 1)
-  }, [])
-
-  const handleSimReset = useCallback(() => {
-    simRef.current?.reset()
-    setSimTick((t) => t + 1)
-  }, [])
+  const handleFire = useCallback((event: string) => { simRef.current?.fire(event); bumpSim() }, [bumpSim])
+  const handleFireTo = useCallback((to: string) => { simRef.current?.fireTo(simRef.current.activeEntityId, to); bumpSim() }, [bumpSim])
+  const handleStep = useCallback(() => { simRef.current?.step(); bumpSim() }, [bumpSim])
+  const handleStepAll = useCallback(() => { simRef.current?.stepAll(); bumpSim() }, [bumpSim])
+  const handleSimReset = useCallback(() => { simRef.current?.reset(); bumpSim() }, [bumpSim])
+  const handleSpawn = useCallback(() => { simRef.current?.spawn(); bumpSim() }, [bumpSim])
+  const handleRemoveEntity = useCallback((id: string) => { simRef.current?.removeEntity(id); bumpSim() }, [bumpSim])
+  const handleSelectEntity = useCallback((id: string) => { simRef.current?.selectEntity(id); bumpSim() }, [bumpSim])
 
   const handleZoomIn = useCallback(() => rendererRef.current?.zoomIn(), [])
   const handleZoomOut = useCallback(() => rendererRef.current?.zoomOut(), [])
@@ -373,6 +475,11 @@ export function App() {
     emitState()
   }, [emitState])
 
+  const handleVariablesChange = useCallback((vars: Record<string, number | string | boolean>) => {
+    editorRef.current?.setVariables(vars)
+    emitState()
+  }, [emitState])
+
   const handleTypeChange = useCallback((t: 'flowchart' | 'statemachine') => {
     editorRef.current?.setType(t)
     emitState()
@@ -393,6 +500,14 @@ export function App() {
     if (!ed || !clipboardRef.current?.nodes.length) return
     ed.insertClone(clipboardRef.current.nodes, clipboardRef.current.edges)
     setSelectedId(ed.selected)
+    emitState()
+  }, [emitState])
+
+  const handleSetRole = useCallback((role: 'initial' | 'normal' | 'final') => {
+    const ed = editorRef.current
+    if (!ed) return
+    const ids = ed.selectedNodes.size ? [...ed.selectedNodes] : ed.selected ? [ed.selected] : []
+    for (const id of ids) ed.updateNode(id, { role })
     emitState()
   }, [emitState])
 
@@ -508,22 +623,25 @@ export function App() {
   const hint = mode === 'edit'
     ? 'drag empty = box-select · <kbd>Shift</kbd>-click multi · right-click menu · <kbd>Ctrl+C/V</kbd> copy · arrows nudge · <kbd>Space</kbd>-drag pan · dbl-click rename'
     : mode === 'simulate'
-    ? 'Fire events in the panel · <kbd>Step</kbd> auto-advance · <kbd>Reset</kbd> · scroll to zoom · drag to pan'
+    ? '<kbd>1</kbd>–<kbd>9</kbd> fire event / branch · <kbd>Space</kbd> step all · <kbd>S</kbd> step · <kbd>N</kbd> spawn token · <kbd>↑↓</kbd> switch token · <kbd>R</kbd> reset'
     : '<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> pick path · <kbd>R</kbd> restart · scroll to zoom · drag to pan'
 
   return (
     <>
       <canvas ref={canvasRef} id="c" />
+      <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleImportFile} />
 
       <TopBar
         diagram={diagram}
         theme={themeName}
         mode={mode}
         graphType={editor?.state.type ?? 'flowchart'}
+        savedDiagrams={savedList}
         onDiagramChange={handleDiagramChange}
         onThemeChange={handleThemeChange}
         onModeChange={handleModeChange}
         onTypeChange={handleTypeChange}
+        onNew={handleNew}
       />
 
       <ZoomBar
@@ -536,11 +654,23 @@ export function App() {
 
       <SidePanel open={sideOpen} onToggle={handleTogglePanel}>
         {mode === 'simulate' && simRef.current ? (
-          <SimPanel sim={simRef.current} tick={simTick} onFire={handleFire} onStep={handleStep} onReset={handleSimReset} />
+          <SimPanel
+            sim={simRef.current}
+            tick={simTick}
+            isStateMachine={editor?.state.type === 'statemachine'}
+            onFire={handleFire}
+            onFireTo={handleFireTo}
+            onStep={handleStep}
+            onStepAll={handleStepAll}
+            onReset={handleSimReset}
+            onSpawn={handleSpawn}
+            onRemoveEntity={handleRemoveEntity}
+            onSelectEntity={handleSelectEntity}
+          />
         ) : (
         <>
         <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: '1px solid var(--line)', paddingBottom: 4 }}>
-          {(['palette', 'json', 'props'] as const).map((tab) => (
+          {(['palette', 'text', 'json', 'props'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -579,7 +709,22 @@ export function App() {
             onFontChange={handleGlobalFont}
             onRelayout={handleRelayout}
             dir={editor?.state.dir ?? 'TD'}
+            onSaveDiagram={handleSaveDiagram}
+            onImport={handleImport}
+            onExportJson={handleExportJson}
+            onDeleteDiagram={handleDeleteDiagram}
+            isSaved={!isTemplate(diagram) && savedList.includes(diagram)}
           />
+        )}
+
+        {activeTab === 'palette' && (
+          <div style={{ marginTop: 18, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+            <VariablesEditor variables={editor?.state.variables ?? {}} onChange={handleVariablesChange} />
+          </div>
+        )}
+
+        {activeTab === 'text' && (
+          <DslPanel seed={editor ? toDSL(editor.state) : ''} onApply={(spec) => applySpec(spec, diagram, true)} />
         )}
 
         {activeTab === 'json' && (
@@ -620,6 +765,7 @@ export function App() {
         <ContextMenu
           x={menu.x} y={menu.y} kind={menu.kind}
           canPaste={!!clipboardRef.current?.nodes.length}
+          isStateMachine={editor?.state.type === 'statemachine'}
           onClose={() => setMenu(null)}
           onCopy={copySelection}
           onPaste={pasteClipboard}
@@ -627,6 +773,7 @@ export function App() {
           onDelete={handleDelete}
           onBringFront={handleBringFront}
           onSendBack={handleSendBack}
+          onSetRole={handleSetRole}
         />
       )}
 
@@ -672,10 +819,11 @@ export function App() {
   )
 }
 
-function ContextMenu({ x, y, kind, canPaste, onClose, onCopy, onPaste, onDuplicate, onDelete, onBringFront, onSendBack }: {
-  x: number; y: number; kind: 'node' | 'edge' | 'canvas'; canPaste: boolean
+function ContextMenu({ x, y, kind, canPaste, isStateMachine, onClose, onCopy, onPaste, onDuplicate, onDelete, onBringFront, onSendBack, onSetRole }: {
+  x: number; y: number; kind: 'node' | 'edge' | 'canvas'; canPaste: boolean; isStateMachine: boolean
   onClose: () => void; onCopy: () => void; onPaste: () => void; onDuplicate: () => void
   onDelete: () => void; onBringFront: () => void; onSendBack: () => void
+  onSetRole: (role: 'initial' | 'normal' | 'final') => void
 }) {
   useEffect(() => {
     const close = () => onClose()
@@ -712,6 +860,10 @@ function ContextMenu({ x, y, kind, canPaste, onClose, onCopy, onPaste, onDuplica
       {isNode && item('Duplicate  ⌘D', onDuplicate)}
       {isNode && item('Copy  ⌘C', onCopy)}
       {item('Paste  ⌘V', onPaste, false, !canPaste)}
+      {isNode && isStateMachine && sep}
+      {isNode && isStateMachine && item('Mark as initial ●', () => onSetRole('initial'))}
+      {isNode && isStateMachine && item('Mark as final ◉', () => onSetRole('final'))}
+      {isNode && isStateMachine && item('Mark as normal', () => onSetRole('normal'))}
       {isNode && sep}
       {isNode && item('Bring to front', onBringFront)}
       {isNode && item('Send to back', onSendBack)}
