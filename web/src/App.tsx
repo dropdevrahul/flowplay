@@ -10,6 +10,8 @@ import { ToolPalette } from './components/ToolPalette'
 import { JsonEditor } from './components/JsonEditor'
 import { PropertyEditor } from './components/PropertyEditor'
 import { VariablesEditor } from './components/VariablesEditor'
+import { DslPanel } from './components/DslPanel'
+import { toDSL } from './renderer/dsl'
 import { SimPanel } from './components/SimPanel'
 import { Simulation } from './renderer/sim'
 import { layoutDiagram, nodeSize } from './renderer/layout'
@@ -39,7 +41,7 @@ export function App() {
   const [error, setError] = useState('')
   const [mode, setMode] = useState<'view' | 'edit' | 'simulate'>('view')
   const [sideOpen, setSideOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'palette' | 'json' | 'props'>('palette')
+  const [activeTab, setActiveTab] = useState<'palette' | 'text' | 'json' | 'props'>('palette')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [editingLabel, setEditingLabel] = useState<{ id: string; edge?: { from: string; to: string }; x: number; y: number; w: number; h: number; label: string } | null>(null)
@@ -660,7 +662,7 @@ export function App() {
         ) : (
         <>
         <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: '1px solid var(--line)', paddingBottom: 4 }}>
-          {(['palette', 'json', 'props'] as const).map((tab) => (
+          {(['palette', 'text', 'json', 'props'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -711,6 +713,10 @@ export function App() {
           <div style={{ marginTop: 18, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
             <VariablesEditor variables={editor?.state.variables ?? {}} onChange={handleVariablesChange} />
           </div>
+        )}
+
+        {activeTab === 'text' && (
+          <DslPanel seed={editor ? toDSL(editor.state) : ''} onApply={(spec) => applySpec(spec, diagram, true)} />
         )}
 
         {activeTab === 'json' && (
