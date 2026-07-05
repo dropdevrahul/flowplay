@@ -4,12 +4,19 @@ import { NODE_PALETTE } from '../theme'
 export function nodeSize(kind?: string) {
   if (kind === 'ellipse') return { w: 148, h: 62 }
   if (kind === 'diamond') return { w: 158, h: 86 }
+  if (kind === 'circle') return { w: 96, h: 96 }
+  if (kind === 'cylinder') return { w: 128, h: 92 }
+  if (kind === 'stadium') return { w: 160, h: 56 }
+  if (kind === 'hexagon') return { w: 168, h: 72 }
+  if (kind === 'parallelogram') return { w: 164, h: 66 }
   return { w: 156, h: 66 }
 }
 
 export const contentBox: ContentBox = { x: 0, y: 0, w: 700, h: 470 }
 
-export function layoutDiagram(spec: any) {
+export type LayoutDir = 'TD' | 'BT' | 'LR' | 'RL'
+
+export function layoutDiagram(spec: any, dir: LayoutDir = spec?.dir ?? 'TD') {
   const nodes: NodeSpec[] = spec.nodes || []
   const edges: { from: string; to: string }[] = spec.edges || []
   if (!nodes.length) return
@@ -67,14 +74,19 @@ export function layoutDiagram(spec: any) {
   }
 
   const SLOT = 210, ROW = 150
+  const nLayers = layers.length
+  const horizontal = dir === 'LR' || dir === 'RL'
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   layers.forEach((L, r) => {
-    const y = r * ROW
+    // rank axis position (flipped for BT / RL)
+    const rankIdx = (dir === 'BT' || dir === 'RL') ? (nLayers - 1 - r) : r
+    const along = rankIdx * (horizontal ? SLOT : ROW)
     L.forEach((n, i) => {
       const s = nodeSize(n.kind)
       n.w = s.w; n.h = s.h
-      n.x = (i - (L.length - 1) / 2) * SLOT - s.w / 2
-      n.y = y
+      const cross = (i - (L.length - 1) / 2) * SLOT
+      if (horizontal) { n.x = along; n.y = cross - s.h / 2 }
+      else { n.x = cross - s.w / 2; n.y = along }
       minX = Math.min(minX, n.x!); minY = Math.min(minY, n.y!)
       maxX = Math.max(maxX, n.x! + n.w!); maxY = Math.max(maxY, n.y! + n.h!)
     })

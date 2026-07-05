@@ -85,7 +85,8 @@ function NodeProperties({ node, onUpdate, isStateMachine }: { node: NodeSpec; on
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <div style={labelCol}>Label</div>
-        <input style={input} value={node.label ?? ''} onChange={(e) => onUpdate(node.id, { label: e.target.value })} />
+        <textarea style={{ ...input, resize: 'vertical', minHeight: 30, lineHeight: 1.3, fontFamily: 'var(--font-display)' }} rows={node.label?.includes('\n') ? 3 : 1}
+          value={node.label ?? ''} onChange={(e) => onUpdate(node.id, { label: e.target.value })} />
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -95,6 +96,11 @@ function NodeProperties({ node, onUpdate, isStateMachine }: { node: NodeSpec; on
           <option value="rect">rect</option>
           <option value="ellipse">ellipse</option>
           <option value="diamond">diamond</option>
+          <option value="stadium">stadium (pill)</option>
+          <option value="cylinder">cylinder (database)</option>
+          <option value="hexagon">hexagon</option>
+          <option value="parallelogram">parallelogram</option>
+          <option value="circle">circle</option>
         </select>
       </div>
 
@@ -230,9 +236,18 @@ function EdgeProperties({ edge, onUpdate, onReconnect, allNodes, isStateMachine 
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <div style={labelCol}>Route</div>
-        <select style={input} value={edge.route ?? 'curved'} onChange={(e) => up({ route: e.target.value as EdgeSpec['route'] })}>
-          <option value="curved">auto (elbow)</option>
-          <option value="orthogonal">manual waypoints</option>
+        <select style={input} value={edge.route ?? 'orthogonal'} onChange={(e) => up({ route: e.target.value as EdgeSpec['route'] })}>
+          <option value="orthogonal">elbow (right angles)</option>
+          <option value="straight">straight</option>
+          <option value="curved">curved</option>
+        </select>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <div style={labelCol}>Arrow</div>
+        <select style={input} value={edge.arrow ?? 'end'} onChange={(e) => up({ arrow: e.target.value as EdgeSpec['arrow'] })}>
+          <option value="end">end →</option>
+          <option value="both">both ↔</option>
+          <option value="none">none</option>
         </select>
       </div>
       <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 2, lineHeight: 1.6 }}>

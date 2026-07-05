@@ -43,6 +43,9 @@ export function App() {
   const [editingLabel, setEditingLabel] = useState<{ id: string; edge?: { from: string; to: string }; x: number; y: number; w: number; h: number; label: string } | null>(null)
   const simRef = useRef<Simulation | null>(null)
   const [simTick, setSimTick] = useState(0)
+  const clipboardRef = useRef<{ nodes: NodeSpec[]; edges: EdgeSpec[] } | null>(null)
+  const [selTick, setSelTick] = useState(0)
+  const [menu, setMenu] = useState<{ x: number; y: number; kind: 'node' | 'edge' | 'canvas' } | null>(null)
 
   const editor = editorRef.current
 
@@ -56,6 +59,7 @@ export function App() {
     r.onSelectionChange = setSelectedId
     r.onDoubleClick = handleDoubleClick
     r.onEdgeDoubleClick = handleEdgeDoubleClick
+    r.onContextMenu = (x, y, kind) => setMenu({ x, y, kind })
     r.init(canvas, themeName).then(() => {
       r.loadDiagram(diagram)
     })
@@ -94,6 +98,8 @@ export function App() {
       if (editorRef.current) {
         setJsonStr(editorRef.current.toJSON())
         setSelectedId(editorRef.current?.selected ?? null)
+        setSelTick((t) => t + 1)
+        if (editorRef.current.multiCount > 1) setActiveTab('props')
       }
     }
     window.addEventListener('editor-state-change', handler)
@@ -120,6 +126,44 @@ export function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [mode, diagram])
 
+  // copy / cut / paste of the selected node(s) via an in-memory clipboard
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (mode !== 'edit') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      const ed = editorRef.current
+      if (!ed) return
+      const key = e.key.toLowerCase()
+      const meta = e.ctrlKey || e.metaKey
+      if (meta && (key === 'c' || key === 'x') && ed.selectedNodes.size) {
+        const ids = new Set(ed.selectedNodes)
+        const nodes = ed.state.nodes.filter((n) => ids.has(n.id)).map((n) => JSON.parse(JSON.stringify(n)))
+        const edges = ed.state.edges.filter((eg) => ids.has(eg.from) && ids.has(eg.to)).map((eg) => JSON.parse(JSON.stringify(eg)))
+        clipboardRef.current = { nodes, edges }
+        e.preventDefault()
+        if (key === 'x') {
+          ed.removeSelectedNodes()
+          setSelectedId(null)
+          emitState()
+        }
+      } else if (meta && key === 'v' && clipboardRef.current?.nodes.length) {
+        ed.insertClone(clipboardRef.current.nodes, clipboardRef.current.edges)
+        setSelectedId(ed.selected)
+        emitState()
+        e.preventDefault()
+      } else if (meta && key === 'd' && ed.selectedNodes.size) {
+        ed.duplicateNodes([...ed.selectedNodes])
+        setSelectedId(ed.selected)
+        emitState()
+        e.preventDefault()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+    // emitState is stable enough for this session; deps kept minimal on purpose
+  }, [mode])
+
   // load JSON string for the JSON editor
   const [jsonStr, setJsonStr] = useState('')
   const loadJsonStr = useCallback(async (name: string) => {
@@ -135,6 +179,7 @@ export function App() {
         const ed = new DiagramEditor(spec)
         editorRef.current = ed
       }
+      if (rendererRef.current) rendererRef.current.editor = editorRef.current
       // rebuild the simulation if we loaded a new diagram while simulating
       if (rendererRef.current?.simMode && editorRef.current) {
         const sim = new Simulation(editorRef.current.state)
@@ -172,7 +217,9 @@ export function App() {
     if (!r) return
     r.editMode = newMode !== 'view'
     r.simMode = newMode === 'simulate'
-    r.editor = newMode !== 'view' ? editorRef.current : null
+    // keep the editor reference in every mode so Export can read the diagram;
+    // the editMode flag alone gates interaction and the edit render path
+    r.editor = editorRef.current
     if (newMode === 'simulate' && editorRef.current) {
       const sim = new Simulation(editorRef.current.state)
       simRef.current = sim
@@ -248,7 +295,7 @@ export function App() {
     if (!ed || !ed.selected) return
     const selType = ed.getSelectionType()
     if (selType === 'node') {
-      ed.removeNode(ed.selected)
+      ed.removeSelectedNodes()
     } else if (selType === 'edge') {
       const edge = ed.getSelectedEdge()
       if (edge) ed.removeEdge(edge.from, edge.to)
@@ -301,9 +348,23 @@ export function App() {
 
   const handleDuplicate = useCallback(() => {
     const ed = editorRef.current
-    if (!ed || !ed.selected || ed.getSelectionType() !== 'node') return
-    const nid = ed.duplicateNode(ed.selected)
-    if (nid) setSelectedId(nid)
+    if (!ed || ed.getSelectionType() !== 'node' || !ed.selectedNodes.size) return
+    ed.duplicateNodes([...ed.selectedNodes])
+    setSelectedId(ed.selected)
+    emitState()
+  }, [emitState])
+
+  const handleAlign = useCallback((edge: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') => {
+    const ed = editorRef.current
+    if (!ed) return
+    ed.alignNodes([...ed.selectedNodes], edge)
+    emitState()
+  }, [emitState])
+
+  const handleDistribute = useCallback((axis: 'h' | 'v') => {
+    const ed = editorRef.current
+    if (!ed) return
+    ed.distributeNodes([...ed.selectedNodes], axis)
     emitState()
   }, [emitState])
 
@@ -315,6 +376,46 @@ export function App() {
   const handleTypeChange = useCallback((t: 'flowchart' | 'statemachine') => {
     editorRef.current?.setType(t)
     emitState()
+  }, [emitState])
+
+  const copySelection = useCallback(() => {
+    const ed = editorRef.current
+    if (!ed || !ed.selectedNodes.size) return
+    const ids = new Set(ed.selectedNodes)
+    clipboardRef.current = {
+      nodes: ed.state.nodes.filter((n) => ids.has(n.id)).map((n) => JSON.parse(JSON.stringify(n))),
+      edges: ed.state.edges.filter((eg) => ids.has(eg.from) && ids.has(eg.to)).map((eg) => JSON.parse(JSON.stringify(eg))),
+    }
+  }, [])
+
+  const pasteClipboard = useCallback(() => {
+    const ed = editorRef.current
+    if (!ed || !clipboardRef.current?.nodes.length) return
+    ed.insertClone(clipboardRef.current.nodes, clipboardRef.current.edges)
+    setSelectedId(ed.selected)
+    emitState()
+  }, [emitState])
+
+  const handleBringFront = useCallback(() => {
+    const ed = editorRef.current
+    if (!ed || !ed.selectedNodes.size) return
+    ed.bringToFront([...ed.selectedNodes])
+    emitState()
+  }, [emitState])
+
+  const handleSendBack = useCallback(() => {
+    const ed = editorRef.current
+    if (!ed || !ed.selectedNodes.size) return
+    ed.sendToBack([...ed.selectedNodes])
+    emitState()
+  }, [emitState])
+
+  const handleRelayout = useCallback((dir: 'TD' | 'BT' | 'LR' | 'RL') => {
+    const ed = editorRef.current
+    if (!ed) return
+    ed.relayout(dir)
+    emitState()
+    rendererRef.current?.resetView()
   }, [emitState])
 
   const handleClear = useCallback(() => {
@@ -405,7 +506,7 @@ export function App() {
 
   // hint text
   const hint = mode === 'edit'
-    ? '<kbd>Del</kbd> delete · <kbd>Ctrl+Z</kbd> undo · drag node to move · drag port to connect · dbl-click to rename'
+    ? 'drag empty = box-select · <kbd>Shift</kbd>-click multi · right-click menu · <kbd>Ctrl+C/V</kbd> copy · arrows nudge · <kbd>Space</kbd>-drag pan · dbl-click rename'
     : mode === 'simulate'
     ? 'Fire events in the panel · <kbd>Step</kbd> auto-advance · <kbd>Reset</kbd> · scroll to zoom · drag to pan'
     : '<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> pick path · <kbd>R</kbd> restart · scroll to zoom · drag to pan'
@@ -430,6 +531,7 @@ export function App() {
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onZoomReset={handleZoomReset}
+        onExport={() => rendererRef.current?.exportPNG()}
       />
 
       <SidePanel open={sideOpen} onToggle={handleTogglePanel}>
@@ -475,6 +577,8 @@ export function App() {
             canRedo={editor?.canRedo() ?? false}
             fontSize={editor?.state.fontSize ?? 16}
             onFontChange={handleGlobalFont}
+            onRelayout={handleRelayout}
+            dir={editor?.state.dir ?? 'TD'}
           />
         )}
 
@@ -483,6 +587,9 @@ export function App() {
         )}
 
         {activeTab === 'props' && (
+          (editor?.multiCount ?? 0) > 1 ? (
+            <AlignPanel count={editor!.multiCount} onAlign={handleAlign} onDistribute={handleDistribute} onDuplicate={handleDuplicate} onDelete={handleDelete} />
+          ) : (
           <PropertyEditor
             node={selectedNode}
             edge={selectedEdge}
@@ -495,6 +602,7 @@ export function App() {
             allNodes={editor?.state.nodes ?? []}
             isStateMachine={editor?.state.type === 'statemachine'}
           />
+          )
         )}
         </>
         )}
@@ -505,10 +613,28 @@ export function App() {
       </div>
       <div className="hint" dangerouslySetInnerHTML={{ __html: hint }} />
 
+      {/* selTick forces this subtree to re-read editor.multiCount after canvas selection */}
+      <span style={{ display: 'none' }}>{selTick}</span>
+
+      {menu && (
+        <ContextMenu
+          x={menu.x} y={menu.y} kind={menu.kind}
+          canPaste={!!clipboardRef.current?.nodes.length}
+          onClose={() => setMenu(null)}
+          onCopy={copySelection}
+          onPaste={pasteClipboard}
+          onDuplicate={handleDuplicate}
+          onDelete={handleDelete}
+          onBringFront={handleBringFront}
+          onSendBack={handleSendBack}
+        />
+      )}
+
       {editingLabel && (
-        <input
+        <textarea
           key={editingLabel.id}
           autoFocus
+          rows={1}
           defaultValue={editingLabel.label}
           style={{
             position: 'fixed',
@@ -520,15 +646,20 @@ export function App() {
             color: 'var(--text)',
             border: '2px solid var(--accent)',
             borderRadius: 6,
-            padding: '0 10px',
+            padding: '4px 10px',
             fontSize: 14,
+            lineHeight: 1.25,
             fontFamily: 'var(--font-display)',
             textAlign: 'center',
             outline: 'none',
+            resize: 'none',
+            overflow: 'hidden',
             zIndex: 20,
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            // Enter commits; Shift+Enter inserts a newline for multi-line labels
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
               commitLabel(e.currentTarget.value)
             } else if (e.key === 'Escape') {
               setEditingLabel(null)
@@ -538,5 +669,93 @@ export function App() {
         />
       )}
     </>
+  )
+}
+
+function ContextMenu({ x, y, kind, canPaste, onClose, onCopy, onPaste, onDuplicate, onDelete, onBringFront, onSendBack }: {
+  x: number; y: number; kind: 'node' | 'edge' | 'canvas'; canPaste: boolean
+  onClose: () => void; onCopy: () => void; onPaste: () => void; onDuplicate: () => void
+  onDelete: () => void; onBringFront: () => void; onSendBack: () => void
+}) {
+  useEffect(() => {
+    const close = () => onClose()
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    // defer so the opening right-click doesn't immediately close it
+    const t = setTimeout(() => {
+      window.addEventListener('mousedown', close)
+      window.addEventListener('keydown', onKey)
+    }, 0)
+    return () => { clearTimeout(t); window.removeEventListener('mousedown', close); window.removeEventListener('keydown', onKey) }
+  }, [onClose])
+
+  const item = (label: string, fn: () => void, danger = false, disabled = false): React.ReactNode => (
+    <div
+      onMouseDown={(e) => { e.stopPropagation(); if (!disabled) { fn(); onClose() } }}
+      style={{
+        padding: '6px 14px', fontSize: 12.5, cursor: disabled ? 'default' : 'pointer',
+        color: disabled ? 'var(--muted)' : danger ? '#ef4444' : 'var(--text)',
+        fontFamily: 'var(--font-display)', opacity: disabled ? 0.5 : 1, whiteSpace: 'nowrap',
+      }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 12%, transparent)' }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'none' }}
+    >{label}</div>
+  )
+  const sep = <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+  const isNode = kind === 'node'
+  return (
+    <div style={{
+      position: 'fixed', left: x, top: y, zIndex: 50, minWidth: 168,
+      background: 'color-mix(in srgb, var(--panel) 96%, transparent)',
+      border: '1px solid var(--line)', borderRadius: 10, padding: '5px 0',
+      boxShadow: '0 8px 30px rgba(0,0,0,0.28)', backdropFilter: 'blur(10px)',
+    }}>
+      {isNode && item('Duplicate  ⌘D', onDuplicate)}
+      {isNode && item('Copy  ⌘C', onCopy)}
+      {item('Paste  ⌘V', onPaste, false, !canPaste)}
+      {isNode && sep}
+      {isNode && item('Bring to front', onBringFront)}
+      {isNode && item('Send to back', onSendBack)}
+      {sep}
+      {item('Delete  ⌫', onDelete, true, kind === 'canvas')}
+    </div>
+  )
+}
+
+function AlignPanel({ count, onAlign, onDistribute, onDuplicate, onDelete }: {
+  count: number
+  onAlign: (e: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') => void
+  onDistribute: (a: 'h' | 'v') => void
+  onDuplicate: () => void
+  onDelete: () => void
+}) {
+  const head: React.CSSProperties = { fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', margin: '2px 0 8px' }
+  const btn: React.CSSProperties = { background: 'none', border: '1px solid var(--line)', borderRadius: 7, color: 'var(--text)', cursor: 'pointer', padding: '7px 4px', fontSize: 11, fontFamily: 'var(--font-display)' }
+  const aligns: { k: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'; label: string }[] = [
+    { k: 'left', label: '⤒ Left' }, { k: 'hcenter', label: '↔ Center' }, { k: 'right', label: 'Right ⤓' },
+    { k: 'top', label: '⤒ Top' }, { k: 'vcenter', label: '↕ Middle' }, { k: 'bottom', label: 'Bottom ⤓' },
+  ]
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--text)', marginBottom: 12 }}>
+        <b>{count}</b> nodes selected
+      </div>
+      <div style={head}>Align</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 14 }}>
+        {aligns.map((a) => <button key={a.k} style={btn} onClick={() => onAlign(a.k)}>{a.label}</button>)}
+      </div>
+      <div style={head}>Distribute</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 14 }}>
+        <button style={btn} onClick={() => onDistribute('h')} title="Equal horizontal gaps">⇿ Horizontal</button>
+        <button style={btn} onClick={() => onDistribute('v')} title="Equal vertical gaps">⇳ Vertical</button>
+      </div>
+      <div style={head}>Actions</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        <button style={btn} onClick={onDuplicate}>Duplicate</button>
+        <button style={{ ...btn }} onClick={onDelete}>Delete all</button>
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 14, lineHeight: 1.6 }}>
+        Shift-click to add/remove · drag empty canvas to box-select · arrows nudge · <kbd>Ctrl</kbd>+C/V copy-paste.
+      </div>
+    </div>
   )
 }
