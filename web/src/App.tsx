@@ -63,6 +63,16 @@ export function App() {
     r.onDoubleClick = handleDoubleClick
     r.onEdgeDoubleClick = handleEdgeDoubleClick
     r.onContextMenu = (x, y, kind) => setMenu({ x, y, kind })
+    r.onSimAdvance = (to) => {
+      const sim = simRef.current
+      if (!sim) return
+      const edge = sim.enabledFor().find((eg) => eg.to === to)
+      if (!edge) return
+      if (edge.event) sim.fire(edge.event)
+      else sim.fireTo(sim.activeEntityId, to)
+      setSimTick((x2) => x2 + 1)
+    }
+    r.onSimSelectEntity = (id) => { simRef.current?.selectEntity(id); setSimTick((x2) => x2 + 1) }
     r.init(canvas, themeName).then(() => {
       loadTemplate(diagram)
     })

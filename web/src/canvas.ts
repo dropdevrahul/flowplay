@@ -75,6 +75,8 @@ export class CanvasRenderer implements DrawAPI {
   onDoubleClick: ((nodeId: string, screenX: number, screenY: number) => void) | null = null
   onEdgeDoubleClick: ((from: string, to: string, screenX: number, screenY: number) => void) | null = null
   onContextMenu: ((screenX: number, screenY: number, kind: 'node' | 'edge' | 'canvas') => void) | null = null
+  onSimAdvance: ((toNodeId: string) => void) | null = null
+  onSimSelectEntity: ((entityId: string) => void) | null = null
 
   private boundResize: () => void
   private boundWheel: (e: WheelEvent) => void
@@ -1323,7 +1325,24 @@ export class CanvasRenderer implements DrawAPI {
 
   private onEditMouseDown(e: MouseEvent) {
     if (this.simMode) {
-      // simulate mode: pan only, no editing
+      // simulate mode: click an enabled next-node to advance the active token,
+      // or click another token's node to make that entity active; else pan.
+      const sim = this.simulation
+      if (sim && !this.spaceDown && e.button !== 1) {
+        const rect = this.canvas.getBoundingClientRect()
+        const wx = this.cam.worldX(e.clientX - rect.left)
+        const wy = this.cam.worldY(e.clientY - rect.top)
+        for (let i = sim.state.nodes.length - 1; i >= 0; i--) {
+          const n = sim.state.nodes[i]
+          if (!this.nodeInBounds(n, wx, wy)) continue
+          const targets = sim.enabledFor().map((t) => t.to)
+          if (targets.includes(n.id)) { this.onSimAdvance?.(n.id); return }
+          const ent = sim.entities.find((x) => x.at === n.id)
+          if (ent) { this.onSimSelectEntity?.(ent.id); return }
+          break
+        }
+      }
+      // otherwise pan
       this.dragging = true
       this.last = { x: e.clientX, y: e.clientY }
       this.canvas.style.cursor = 'grabbing'
@@ -1522,6 +1541,13 @@ export class CanvasRenderer implements DrawAPI {
     const my = e.clientY - rect.top
     const wx = this.cam.worldX(mx)
     const wy = this.cam.worldY(my)
+
+    // simulate mode: pointer cursor over an enabled next-node (unless dragging/panning)
+    if (this.simMode && !this.dragging && this.simulation) {
+      const targets = new Set(this.simulation.enabledFor().map((t) => t.to))
+      const hot = this.simulation.state.nodes.some((n) => targets.has(n.id) && this.nodeInBounds(n, wx, wy))
+      this.canvas.style.cursor = hot ? 'pointer' : 'grab'
+    }
 
     if (this.tempEdge) {
       this.tempEdge.toPt = { x: wx, y: wy }
