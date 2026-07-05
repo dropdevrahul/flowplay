@@ -13,6 +13,11 @@ interface ToolPaletteProps {
   onFontChange: (px: number) => void
   onRelayout: (dir: 'TD' | 'BT' | 'LR' | 'RL') => void
   dir: 'TD' | 'BT' | 'LR' | 'RL'
+  onSaveDiagram: () => void
+  onImport: () => void
+  onExportJson: () => void
+  onDeleteDiagram: () => void
+  isSaved: boolean
 }
 
 const NODE_TYPES: { kind: string; label: string; shape: React.ReactNode }[] = [
@@ -60,9 +65,19 @@ const DIRS: { d: 'TD' | 'BT' | 'LR' | 'RL'; label: string }[] = [
   { d: 'BT', label: '↑ Up' }, { d: 'RL', label: '← Left' },
 ]
 
-export function ToolPalette({ onAddNode, onConnect, onAddSubgraph, onDuplicate, onDelete, onClear, onUndo, onRedo, canUndo, canRedo, fontSize, onFontChange, onRelayout, dir }: ToolPaletteProps) {
+export function ToolPalette({ onAddNode, onConnect, onAddSubgraph, onDuplicate, onDelete, onClear, onUndo, onRedo, canUndo, canRedo, fontSize, onFontChange, onRelayout, dir, onSaveDiagram, onImport, onExportJson, onDeleteDiagram, isSaved }: ToolPaletteProps) {
   return (
     <div>
+      <div style={heading}>Diagram</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+        <button style={act} onClick={onSaveDiagram} onMouseEnter={hover(true)} onMouseLeave={hover(false)}>Save</button>
+        <button style={act} onClick={onImport} onMouseEnter={hover(true)} onMouseLeave={hover(false)}>Import JSON</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 18 }}>
+        <button style={act} onClick={onExportJson} onMouseEnter={hover(true)} onMouseLeave={hover(false)}>Export JSON</button>
+        <button style={isSaved ? act : actOff} onClick={isSaved ? onDeleteDiagram : undefined} onMouseEnter={isSaved ? hover(true, '#ef4444') : undefined} onMouseLeave={isSaved ? hover(false) : undefined}>Delete saved</button>
+      </div>
+
       <div style={heading}>Nodes</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 18 }}>
         {NODE_TYPES.map((t) => (

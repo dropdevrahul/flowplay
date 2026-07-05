@@ -268,6 +268,16 @@ export class CanvasRenderer implements DrawAPI {
     ;(this.instance.exports as any).loadJson(json.length)
   }
 
+  // load an in-memory diagram for VIEW-mode playback (saved/imported diagrams
+  // that aren't fetchable files). Mirrors loadDiagram minus the network fetch.
+  loadDiagramState(state: import('./renderer/types').DiagramState) {
+    if (!this.instance) return
+    this.trail = []
+    this.loadStateToWasm(state)
+    this.startLoop()
+    this.resetView()
+  }
+
   // arm click-to-connect from the selected node; returns false if nothing is selected
   armConnect(): boolean {
     const sel = this.editor?.selected
@@ -518,7 +528,9 @@ export class CanvasRenderer implements DrawAPI {
       this.drawSubgraphFromState(sg)
     }
 
-    const simActive = this.simMode ? this.simulation?.active ?? null : null
+    const sim = this.simMode ? this.simulation : null
+    const simActive = sim?.active ?? null
+    const occupied = new Set<string>(sim?.entities.map((e) => e.at) ?? [])
 
     if (!this.simMode && ed.selected && ed.getSelectionType() === 'subgraph') {
       const selSg = ed.getSelectedSubgraph()
@@ -564,9 +576,11 @@ export class CanvasRenderer implements DrawAPI {
     }
 
     for (const n of state.nodes) {
-      const isSel = this.simMode ? n.id === simActive : ed.isNodeSelected(n.id)
+      const isSel = this.simMode ? occupied.has(n.id) : ed.isNodeSelected(n.id)
       this.drawNodeFromState(n, isSel)
     }
+
+    if (sim) this.drawSimTokens(sim, simActive)
 
     if (!this.simMode && ed.selected && ed.getSelectionType() === 'node') {
       const primary = state.nodes.find((n) => n.id === ed.selected)
@@ -898,6 +912,49 @@ export class CanvasRenderer implements DrawAPI {
       ctx.fill()
       ctx.stroke()
       ctx.restore()
+    }
+  }
+
+  // draw a token per simulation entity at its node; multiple entities on the
+  // same node fan out. The active entity's token is brighter with a ring.
+  private drawSimTokens(sim: import('./renderer/sim').Simulation, activeId: string | null) {
+    const ctx = this.ctx
+    const c = this.theme
+    // group entities by node so co-located tokens don't overlap
+    const byNode = new Map<string, typeof sim.entities>()
+    for (const e of sim.entities) {
+      const arr = byNode.get(e.at) ?? []
+      arr.push(e)
+      byNode.set(e.at, arr)
+    }
+    for (const [nid, ents] of byNode) {
+      const n = sim.state.nodes.find((x) => x.id === nid)
+      if (!n) continue
+      const cx = n.x! + n.w! / 2
+      const cy = n.y! + n.h! / 2
+      ents.forEach((e, i) => {
+        // fan tokens horizontally around the node center
+        const spread = (i - (ents.length - 1) / 2) * 20
+        const tx = cx + spread
+        const ty = cy
+        const isActive = e.at === sim.active && sim.activeEntityId === e.id
+        ctx.save()
+        ctx.shadowColor = c.accent
+        ctx.shadowBlur = isActive ? 14 : 6
+        ctx.fillStyle = c.accent
+        ctx.globalAlpha = isActive ? 1 : 0.55
+        ctx.beginPath()
+        ctx.arc(tx, ty, isActive ? 9 : 7, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.shadowColor = 'transparent'
+        // white highlight dot
+        ctx.globalAlpha = isActive ? 0.9 : 0.5
+        ctx.fillStyle = '#ffffff'
+        ctx.beginPath()
+        ctx.arc(tx - 2, ty - 2, isActive ? 3 : 2.4, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      })
     }
   }
 

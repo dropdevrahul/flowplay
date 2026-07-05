@@ -1,10 +1,4 @@
-const diagrams = [
-  { value: 'fetch', label: 'Fetch state machine' },
-  { value: 'traffic', label: 'Traffic light' },
-  { value: 'approval', label: 'Approval flow' },
-  { value: 'checkout', label: 'Order checkout' },
-  { value: 'turnstile', label: 'Turnstile (state machine)' },
-]
+import { TEMPLATES } from '../renderer/storage'
 
 const themes = [
   { value: 'dark', label: 'Dark' },
@@ -19,25 +13,43 @@ interface TopBarProps {
   theme: string
   mode: Mode
   graphType: 'flowchart' | 'statemachine'
+  savedDiagrams: string[]
   onDiagramChange: (name: string) => void
   onThemeChange: (name: string) => void
   onModeChange: (mode: Mode) => void
   onTypeChange: (t: 'flowchart' | 'statemachine') => void
+  onNew: () => void
 }
 
 const MODES: Mode[] = ['view', 'edit', 'simulate']
 
-export function TopBar({ diagram, theme, mode, graphType, onDiagramChange, onThemeChange, onModeChange, onTypeChange }: TopBarProps) {
+export function TopBar({ diagram, theme, mode, graphType, savedDiagrams, onDiagramChange, onThemeChange, onModeChange, onTypeChange, onNew }: TopBarProps) {
   return (
     <div className="panel topbar">
       <span className="brand">Flowplay</span>
       <div className="divider" />
+      <button onClick={onNew} title="New blank diagram"
+        style={{ background: 'none', border: '1px solid var(--line)', borderRadius: 8, color: 'var(--text)', cursor: 'pointer', padding: '5px 10px', fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-display)' }}>
+        ＋ New
+      </button>
       <div className="field">
         <label htmlFor="pick">Diagram</label>
-        <select id="pick" value={diagram} onChange={(e) => onDiagramChange(e.target.value)}>
-          {diagrams.map((d) => (
-            <option key={d.value} value={d.value}>{d.label}</option>
-          ))}
+        <select id="pick" value={savedDiagrams.includes(diagram) || TEMPLATES.some((t) => t.id === diagram) ? diagram : ''} onChange={(e) => e.target.value && onDiagramChange(e.target.value)}>
+          {!savedDiagrams.includes(diagram) && !TEMPLATES.some((t) => t.id === diagram) && (
+            <option value="">{diagram || 'Untitled'} (unsaved)</option>
+          )}
+          <optgroup label="Templates">
+            {TEMPLATES.map((d) => (
+              <option key={d.id} value={d.id}>{d.label}</option>
+            ))}
+          </optgroup>
+          {savedDiagrams.length > 0 && (
+            <optgroup label="My diagrams">
+              {savedDiagrams.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </div>
       <div className="divider" />
