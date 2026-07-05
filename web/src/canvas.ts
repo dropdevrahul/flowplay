@@ -235,7 +235,7 @@ export class CanvasRenderer implements DrawAPI {
     this.trail = []
     let text: string
     try {
-      const resp = await fetch(`/examples/${name}.json`)
+      const resp = await fetch(`${import.meta.env.BASE_URL}examples/${name}.json`)
       text = await resp.text()
     } catch {
       this.onError?.(`failed to load ${name}`)

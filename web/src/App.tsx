@@ -168,7 +168,7 @@ export function App() {
   const [jsonStr, setJsonStr] = useState('')
   const loadJsonStr = useCallback(async (name: string) => {
     try {
-      const resp = await fetch(`/examples/${name}.json`)
+      const resp = await fetch(`${import.meta.env.BASE_URL}examples/${name}.json`)
       const text = await resp.text()
       const spec = JSON.parse(text) as DiagramState
       layoutDiagram(spec)

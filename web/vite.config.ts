@@ -24,6 +24,8 @@ if (existsSync(examplesSrc)) {
   }
 }
 
+// BASE_PATH is set to "/flowplay/" by the GitHub Pages workflow; "/" locally
 export default defineConfig({
+  base: process.env.BASE_PATH || '/',
   plugins: [react()],
 })
