@@ -689,6 +689,16 @@ export class CanvasRenderer implements DrawAPI {
     }
     const p1 = this.borderPt(a, bx, by)
     const p2 = this.borderPt(b, ax, ay)
+    // a reverse edge exists (A<->B) → bow both to opposite sides so they and
+    // their labels don't overlap. Deterministic side by comparing endpoint ids.
+    if (this.hasReverseEdge(edge)) {
+      const side = edge.from < edge.to ? 1 : -1
+      const dx0 = p2.x - p1.x, dy0 = p2.y - p1.y
+      const len = Math.hypot(dx0, dy0) || 1
+      const off = 26 * side
+      const mid = { x: (p1.x + p2.x) / 2 - (dy0 / len) * off, y: (p1.y + p2.y) / 2 + (dx0 / len) * off }
+      return [p1, mid, p2]
+    }
     // straight and curved both hit-test/draw against the direct segment
     if (route === 'straight' || route === 'curved') return [p1, p2]
     const dy = p2.y - p1.y, dx = p2.x - p1.x
@@ -700,13 +710,42 @@ export class CanvasRenderer implements DrawAPI {
     return [p1, { x: midX, y: p1.y }, { x: midX, y: p2.y }, p2]
   }
 
+  // after connecting two states in a state machine, immediately open the inline
+  // event editor on the new edge so authoring "A --EVENT--> B" is one gesture
+  private maybeEditNewEdge(from: string, to: string) {
+    const ed = this.editor
+    if (!ed || ed.state.type !== 'statemachine') return
+    const edge = ed.state.edges.find((e) => e.from === from && e.to === to)
+    const a = ed.state.nodes.find((n) => n.id === from)
+    const b = ed.state.nodes.find((n) => n.id === to)
+    if (!edge || !a || !b) return
+    ed.select('edge:' + from + '→' + to)
+    this.onSelectionChange?.('edge:' + from + '→' + to)
+    const path = this.edgePath(a, b, edge)
+    const m = Math.floor(path.length / 2)
+    const mid = path.length % 2 === 0
+      ? { x: (path[m - 1].x + path[m].x) / 2, y: (path[m - 1].y + path[m].y) / 2 }
+      : path[m]
+    const rect = this.canvas.getBoundingClientRect()
+    const sx = mid.x * this.cam.zoom + this.cam.x + rect.left
+    const sy = mid.y * this.cam.zoom + this.cam.y + rect.top
+    // defer to the next tick so the inline editor opens AFTER this click's
+    // mouseup/click settles — otherwise the fresh input is blurred immediately
+    setTimeout(() => this.onEdgeDoubleClick?.(from, to, sx, sy), 0)
+  }
+
+  private hasReverseEdge(edge: EdgeSpec): boolean {
+    return !!this.editor?.state.edges.some((e) => e.from === edge.to && e.to === edge.from)
+  }
+
   private drawEdgeFromState(a: NodeSpec, b: NodeSpec, edge: EdgeSpec, active: boolean) {
     const c = this.theme
     const ctx = this.ctx
     const path = this.edgePath(a, b, edge)
     const stroke = active ? c.accent : (edge.color !== undefined ? hexU32(edge.color) : c.edge)
 
-    const curved = (edge.route ?? 'orthogonal') === 'curved' && path.length >= 2
+    // bidirectional bow (3-pt) and explicit curved route both render smoothed
+    const curved = path.length >= 2 && ((edge.route ?? 'orthogonal') === 'curved' || (!edge.waypoints && this.hasReverseEdge(edge)))
     ctx.save()
     ctx.beginPath()
     ctx.moveTo(path[0].x, path[0].y)
@@ -1415,6 +1454,7 @@ export class CanvasRenderer implements DrawAPI {
           ed.addEdge(from, n.id)
           this.loadStateToWasm(ed.state)
           window.dispatchEvent(new CustomEvent('editor-state-change'))
+          this.maybeEditNewEdge(from, n.id)
           return
         }
       }
@@ -1678,9 +1718,11 @@ export class CanvasRenderer implements DrawAPI {
         for (const n of ed.state.nodes) {
           if (n.id === this.tempEdge.fromNode) continue
           if (this.nodeInBounds(n, mx, my)) {
-            ed.addEdge(this.tempEdge.fromNode, n.id)
+            const src = this.tempEdge.fromNode
+            ed.addEdge(src, n.id)
             this.loadStateToWasm(ed.state)
             window.dispatchEvent(new CustomEvent('editor-state-change'))
+            this.maybeEditNewEdge(src, n.id)
             break
           }
         }
